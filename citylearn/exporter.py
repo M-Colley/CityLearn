@@ -327,13 +327,26 @@ class EpisodeExporter:
                 for building in self._buildings_for_time_step(time_step, baseline_env)
             ]
 
+        net_series = getattr(baseline_env, '_net_electricity_consumption_history', None)
+        cost_series = getattr(baseline_env, '_net_electricity_consumption_cost_history', None)
+        emission_series = getattr(baseline_env, '_net_electricity_consumption_emission_history', None)
+
         return {
             'time_step': time_step,
             'name': 'District',
             'level': 'district',
-            'net_electricity_consumption_kwh': self._series_value(baseline_env.net_electricity_consumption, time_step),
-            'net_electricity_consumption_cost': self._series_value(baseline_env.net_electricity_consumption_cost, time_step),
-            'net_electricity_consumption_emission_kgco2': self._series_value(baseline_env.net_electricity_consumption_emission, time_step),
+            'net_electricity_consumption_kwh': self._series_value(
+                baseline_env.net_electricity_consumption if net_series is None else net_series,
+                time_step,
+            ),
+            'net_electricity_consumption_cost': self._series_value(
+                baseline_env.net_electricity_consumption_cost if cost_series is None else cost_series,
+                time_step,
+            ),
+            'net_electricity_consumption_emission_kgco2': self._series_value(
+                baseline_env.net_electricity_consumption_emission if emission_series is None else emission_series,
+                time_step,
+            ),
             'solar_generation_kwh': sum(row['solar_generation_kwh'] for row in rows),
             'bess_electricity_consumption_kwh': sum(row['bess_electricity_consumption_kwh'] for row in rows),
             'bess_soc': '',

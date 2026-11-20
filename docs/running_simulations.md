@@ -180,6 +180,26 @@ gamma_macro = gamma ** info["executed_steps"]
 
 When `return_substeps=True`, `info` also includes `substep_rewards`, `substep_infos` and `substep_actions_applied` for debugging. Keep it disabled in long training runs.
 
+## Reading Latest Step Values vs Full Histories
+
+`CityLearnEnv` stores episode rewards and the three district net-consumption series in preallocated `float64` buffers. Each access to the full-history list properties (`env.rewards`, `env.net_electricity_consumption`, `env.net_electricity_consumption_cost`, `env.net_electricity_consumption_emission`) builds and returns a fresh Python `list` so mutating a returned list never alters the environment.
+
+Inside a rollout loop, read the constant-time latest-value properties instead of indexing `[-1]` on the full lists:
+
+| Full-history list (`O(t)` copy) | Latest step value (`O(1)` in episode length) |
+|---|---|
+| `env.rewards` | `env.last_rewards` |
+| `env.net_electricity_consumption` | `env.last_net_electricity_consumption` |
+| `env.net_electricity_consumption_cost` | `env.last_net_electricity_consumption_cost` |
+| `env.net_electricity_consumption_emission` | `env.last_net_electricity_consumption_emission` |
+
+```python
+latest_reward_row = env.last_rewards
+latest_net_kwh = env.last_net_electricity_consumption
+latest_cost_eur = env.last_net_electricity_consumption_cost
+latest_emission_kgco2 = env.last_net_electricity_consumption_emission
+```
+
 ## CLI
 
 The CLI needs only CityLearn for its listing commands and for the default

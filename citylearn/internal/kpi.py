@@ -1651,6 +1651,16 @@ class CityLearnKPIService:
         active_steps = float(count[max(int(t_start), 0):].sum())
         return active_steps*self.env.seconds_per_time_step/86400.
 
+    @staticmethod
+    def _series_array(target, base_name: str, suffix: str = '') -> np.ndarray:
+        attr = f'{base_name}{suffix}'
+        if suffix == '' and attr not in getattr(target, '__dict__', ()):
+            history = getattr(target, f'_{base_name}_history', None)
+            if history is not None and hasattr(history, 'as_array'):
+                return np.array(history.as_array(), dtype='float64')
+
+        return np.array(getattr(target, attr), dtype='float64')
+
     def _energy_values(self, building, values):
         """Energy belongs to executed active intervals, not the terminal observation."""
         array = np.asarray(values, dtype='float64')[:int(getattr(self.env, 'time_step', len(values)))].copy()
@@ -2423,8 +2433,8 @@ class CityLearnKPIService:
         env = self.env
         daily_steps = self._window_steps(24.0 * 3600.0, env.seconds_per_time_step)
         monthly_steps = self._window_steps(730.0 * 3600.0, env.seconds_per_time_step)
-        current_net = np.array(env.net_electricity_consumption, dtype='float64')
-        bau_net = np.array(bau_env.net_electricity_consumption, dtype='float64')
+        current_net = self._series_array(env, 'net_electricity_consumption')
+        bau_net = self._series_array(bau_env, 'net_electricity_consumption')
         step_hours = max(float(env.seconds_per_time_step) / 3600.0, 1.0e-12)
         current_net_power = current_net / step_hours
         bau_net_power = bau_net / step_hours
@@ -2919,8 +2929,8 @@ class CityLearnKPIService:
             evaluation_condition_cls.WITHOUT_STORAGE_AND_PARTIAL_LOAD_BUT_WITH_PV
             if baseline_condition is None else baseline_condition
         )
-        env_net_c = np.array(getattr(env, f'net_electricity_consumption{env_control_condition.value}'), dtype='float64')
-        env_net_b = np.array(getattr(env, f'net_electricity_consumption{env_baseline_condition.value}'), dtype='float64')
+        env_net_c = self._series_array(env, 'net_electricity_consumption', env_control_condition.value)
+        env_net_b = self._series_array(env, 'net_electricity_consumption', env_baseline_condition.value)
         env_export_c = self._sum_finite(np.clip(-env_net_c, 0.0, None))
         env_export_b = self._sum_finite(np.clip(-env_net_b, 0.0, None))
         put(

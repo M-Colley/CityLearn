@@ -58,6 +58,7 @@ These changes require no dataset, schema or KPI migration. Valid runs give the s
 - **Logging.** CityLearn no longer configures the root logger. Warnings still print; to see INFO messages, configure logging in your script, for example `logging.basicConfig(level=logging.INFO)`. `learn(logging_level=...)` and `DataSet(logging_level=...)` set the level of the `citylearn` logger only when passed.
 - **Export location.** Exports go to `./render_logs` in the working directory by default, and relative `render_directory` values resolve against the working directory. Pass an absolute `render_directory` to keep the previous location.
 - **Physics invariants** raise `PhysicsInvariantError`, which is an `AssertionError`, so existing handlers keep working.
+- **Per-step history reads.** `env.rewards`, `env.net_electricity_consumption`, `env.net_electricity_consumption_cost` and `env.net_electricity_consumption_emission` store values in preallocated `float64` buffers and build a fresh `list` on each access so mutating a returned list cannot change the environment. In rollout loops that only need the latest step's values, read `env.last_rewards`, `env.last_net_electricity_consumption`, `env.last_net_electricity_consumption_cost` and `env.last_net_electricity_consumption_emission` instead of indexing `[-1]` on the full lists.
 
 ### Consecutive episode splits share their boundary row
 
