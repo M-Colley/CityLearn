@@ -2,10 +2,11 @@
 
 NumPy 2 (NEP 50) evaluates ``float32_scalar <op> python_number`` in float32 where NumPy 1 used
 float64, and compares such operands in float32. Unhandled, that shifts every result by float32
-rounding from the first step on. The reference below was recorded with NumPy 1.26; CI runs this
-test under NumPy 1.x and 2.x.
+rounding from the first step on. The references were recorded with NumPy 1.x; CI runs this test under
+NumPy 1.x and 2.x. There is one reference per physics version: version 1 (the physics of CityLearn
+3.6.0, ``numpy_version_reference.json``) and version 2 (``numpy_version_reference_physics2.json``).
 
-Regenerate (NumPy 1.x only, after a reviewed change of results):
+Regenerate (NumPy 1.x only, after a reviewed change of results, both files at once):
 ``python tests/test_numpy_version_independence.py --write``.
 """
 
@@ -20,7 +21,8 @@ import pytest
 from citylearn.citylearn import CityLearnEnv
 
 ROOT = Path(__file__).resolve().parents[1]
-REFERENCE = Path(__file__).resolve().parent/'data'/'numpy_version_reference.json'
+DATA = Path(__file__).resolve().parent/'data'
+REFERENCES = {1: DATA/'numpy_version_reference.json', 2: DATA/'numpy_version_reference_physics2.json'}
 STEPS = 48
 # Far above cross-platform rounding noise, far below the float32 drift NumPy 2 introduced.
 RTOL = 1.0e-9
@@ -39,12 +41,12 @@ def _action(t: int, j: int, low: float, high: float) -> float:
     return min(max(value, float(low)), float(high))
 
 
-def _rollout(name: str) -> dict:
-    # The NumPy 1 reference was recorded with the physics and random streams of CityLearn 3.6.0, which physics
+def _rollout(name: str, physics_version: int) -> dict:
+    # The version 1 reference was recorded with the physics and random streams of CityLearn 3.6.0, which physics
     # version 1 and random_stream_version 'v1' keep. The 'v2' streams use SeedSequence and PCG64, whose output
     # NumPy keeps identical across versions.
     env = CityLearnEnv(str(ROOT/'data'/'datasets'/name/'schema.json'), central_agent=True,
-                       episode_time_steps=STEPS + 1, random_seed=0, physics_version=1,
+                       episode_time_steps=STEPS + 1, random_seed=0, physics_version=physics_version,
                        random_stream_version='v1')
     env.reset(seed=0)
     rewards = []
@@ -77,10 +79,11 @@ def _rollout(name: str) -> dict:
     }
 
 
+@pytest.mark.parametrize('physics_version', sorted(REFERENCES))
 @pytest.mark.parametrize('name', DATASETS)
-def test_rollout_matches_numpy1_reference(name):
-    expected = json.loads(REFERENCE.read_text(encoding='utf-8'))[name]
-    actual = _rollout(name)
+def test_rollout_matches_numpy1_reference(name, physics_version):
+    expected = json.loads(REFERENCES[physics_version].read_text(encoding='utf-8'))[name]
+    actual = _rollout(name, physics_version)
 
     np.testing.assert_allclose(np.asarray(actual['rewards']), np.asarray(expected['rewards']), rtol=RTOL, atol=0.0)
     np.testing.assert_allclose(actual['district_net_electricity_consumption'],
@@ -99,5 +102,8 @@ def test_rollout_matches_numpy1_reference(name):
 if __name__ == '__main__' and '--write' in sys.argv:
     if int(np.__version__.split('.')[0]) != 1:
         raise SystemExit('The reference must be recorded with NumPy 1.x.')
-    REFERENCE.write_text(json.dumps({name: _rollout(name) for name in DATASETS}, indent=1) + '\n', encoding='utf-8')
-    print(f'wrote {REFERENCE}')
+    for version, path in REFERENCES.items():
+        # newline='\n': tests/data is never converted, so a Windows run must not write CRLF into the reference.
+        with path.open('w', encoding='utf-8', newline='\n') as handle:
+            handle.write(json.dumps({name: _rollout(name, version) for name in DATASETS}, indent=1) + '\n')
+        print(f'wrote {path}')

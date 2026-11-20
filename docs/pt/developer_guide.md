@@ -147,6 +147,33 @@ produzem erro; a execução normal não reescreve snapshots. Auditorias de algor
 continuam opcionais e explícitas. As referências de teste usam casos temporários
 pequenos e os fixtures existentes, sem incluir datasets do SoftCPS.
 
+### Referências congeladas e versões da física
+
+A auditoria de paridade e `tests/test_numpy_version_independence.py` mantêm uma
+referência congelada por versão da física, e ambas as verificações correm com cada
+versão:
+
+| Versão | Referência de paridade | Referência NumPy |
+|---|---|---|
+| 1 (física da 3.6.0) | `scripts/audit/snapshots/refactor_parity.json` | `tests/data/numpy_version_reference.json` |
+| 2 (por omissão) | `scripts/audit/snapshots/refactor_parity_physics2.json` | `tests/data/numpy_version_reference_physics2.json` |
+
+As referências da versão 1 protegem o comportamento da 3.6.0 bit a bit e nunca são
+registadas de novo. Só se regista de novo uma referência da versão 2 após uma
+alteração de resultados revista, que deve constar do pull request.
+
+- Paridade: `python scripts/audit/audit_refactor_parity.py --physics-version 2 --capture-reference <novo.json> --output <relatorio.json>`
+  escreve uma proposta (nunca sobrescreve um ficheiro); depois de revista, move-se
+  para o lugar da referência. Sem `--physics-version` a auditoria verifica as duas
+  versões.
+- NumPy: registar apenas com NumPy 1.x, `python tests/test_numpy_version_independence.py --write`
+  (reescreve os dois ficheiros com fins de linha LF; o da versão 1 deve ficar
+  byte a byte idêntico). O CI corre o teste com NumPy 1.x e 2.x contra os mesmos
+  ficheiros.
+
+A impressão digital das entradas da paridade usa o schema e os CSV já lidos, não os
+bytes dos ficheiros, pelo que não depende dos fins de linha.
+
 As fachadas públicas delegam em módulos internos de energia/equipamentos/serviço/
 comunidade nos KPIs, observações/layout de entidades, componentes/inputs no loading
 e contratos/auditoria de robustez. O módulo de limites elétricos é partilhado pelo

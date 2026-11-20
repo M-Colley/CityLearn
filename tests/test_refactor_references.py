@@ -8,10 +8,15 @@ import pytest
 from scripts.audit import audit_refactor_parity as parity
 
 
+def _reference(version):
+    return json.loads(parity.REFERENCES[version].read_text())
+
+
+@pytest.mark.parametrize("version", sorted(parity.REFERENCES))
 @pytest.mark.parametrize("name", parity.CASES)
-def test_fixed_commands_match_frozen_physical_and_interface_reference(tmp_path, name):
-    reference = json.loads(parity.DEFAULT_REFERENCE.read_text())
-    actual, proof = parity.run_case(name, tmp_path)
+def test_fixed_commands_match_frozen_physical_and_interface_reference(tmp_path, name, version):
+    reference = _reference(version)
+    actual, proof = parity.run_case(name, tmp_path, version)
     comparison = parity.compare(reference["cases"][name], actual)
     assert comparison["matches"], comparison["differences"]
     assert proof["status"] == "pass" and proof["intervals"] == 7
@@ -24,8 +29,9 @@ def test_fixed_commands_match_frozen_physical_and_interface_reference(tmp_path, 
     assert any(abs(value) > 1e-5 for row in physical for value in row["chargers"].values())
 
 
-def test_reference_covers_both_delivered_and_unserved_machine_requests():
-    cases = json.loads(parity.DEFAULT_REFERENCE.read_text())["cases"].values()
+@pytest.mark.parametrize("version", sorted(parity.REFERENCES))
+def test_reference_covers_both_delivered_and_unserved_machine_requests(version):
+    cases = _reference(version)["cases"].values()
     service = [case["service"]["district"] for case in cases]
     assert any(row["served_energy_kwh"] > 0.0 for row in service)
     assert any(row["final_unserved_energy_kwh"] > 0.0 for row in service)
@@ -49,12 +55,21 @@ def test_unknown_zero_structure_order_and_tolerance_policy_are_distinct():
     assert parity.compare({"energy_kwh": 1.0}, {"energy_kwh": 1.0 + 1e-8})["matches"]
 
 
+def test_physics_versions_have_distinct_references_on_identical_inputs():
+    """A reference per version only guards the default physics if version 2 is not a copy of version 1."""
+    one, two = _reference(1)["cases"], _reference(2)["cases"]
+    assert one.keys() == two.keys()
+    for name in one:
+        assert one[name]["input_fingerprint"] == two[name]["input_fingerprint"]
+        assert not parity.compare(one[name], two[name])["matches"]
+
+
 def test_missing_reference_fails_without_capturing_or_creating_one(tmp_path, monkeypatch):
     def unexpected_capture(*args):
         pytest.fail("Verification must load its reference before running/capturing candidates.")
     monkeypatch.setattr(parity, "capture", unexpected_capture)
     missing, output = tmp_path / "missing.json", tmp_path / "report.json"
-    assert parity.main(["--reference", str(missing), "--output", str(output)]) == 1
+    assert parity.main(["--physics-version", "1", "--reference", str(missing), "--output", str(output)]) == 1
     assert json.loads(output.read_text())["verification_passed"] is False
     assert not missing.exists()
 
@@ -63,22 +78,33 @@ def test_existing_reference_proposal_cannot_be_overwritten(tmp_path):
     path = tmp_path / "reference.json"
     path.write_text("original")
     with pytest.raises(SystemExit) as error:
-        parity.main(["--capture-reference", str(path), "--output", str(tmp_path / "report.json")])
+        parity.main(["--physics-version", "2", "--capture-reference", str(path), "--output", str(tmp_path / "report.json")])
     assert error.value.code == 2 and path.read_text() == "original"
     with pytest.raises(SystemExit) as error:
-        parity.main(["--reference", str(path), "--output", str(path.parent / "sub/../reference.json")])
+        parity.main(["--physics-version", "2", "--reference", str(path), "--output", str(path.parent / "sub/../reference.json")])
     assert error.value.code == 2 and path.read_text() == "original"
 
 
-def test_cli_returns_failure_for_a_changed_physical_trajectory(tmp_path, monkeypatch):
-    expected = json.loads(parity.DEFAULT_REFERENCE.read_text())
-    actual = deepcopy(expected)
-    first = actual["cases"]["entity_900s"]["transitions"][0]["physical"]["Building_1"]
+def test_reference_options_need_a_physics_version(tmp_path):
+    with pytest.raises(SystemExit) as error:
+        parity.main(["--reference", str(tmp_path / "r.json"), "--output", str(tmp_path / "report.json")])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("version", sorted(parity.REFERENCES))
+def test_cli_returns_failure_for_a_changed_physical_trajectory(tmp_path, monkeypatch, version):
+    """Each version is checked against its own reference, so a change under version 2 alone fails the run."""
+    references = {v: _reference(v) for v in parity.REFERENCES}
+    actual = {v: deepcopy(r) for v, r in references.items()}
+    first = actual[version]["cases"]["entity_900s"]["transitions"][0]["physical"]["Building_1"]
     first["storage_kwh"] += 0.001
-    monkeypatch.setattr(parity, "capture", lambda _: (actual, {}))
+    monkeypatch.setattr(parity, "capture", lambda _, v: (actual[v], {}))
     output = tmp_path / "report.json"
     assert parity.main(["--output", str(output)]) == 1
     report = json.loads(output.read_text())
     assert not report["verification_passed"]
-    assert report["comparison"]["difference_count"] == 1
-    assert report["comparison"]["differences"][0]["path"].endswith("storage_kwh")
+    assert {v: run["verification_passed"] for v, run in report["versions"].items()} == {
+        str(v): v != version for v in parity.REFERENCES}
+    comparison = report["versions"][str(version)]["comparison"]
+    assert comparison["difference_count"] == 1
+    assert comparison["differences"][0]["path"].endswith("storage_kwh")
