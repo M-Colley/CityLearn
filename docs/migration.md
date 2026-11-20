@@ -312,6 +312,8 @@ key, and keeps one generator per stream:
   same outages in every episode with the same window. A seed given to the
   outage model is now the root of that building's stream instead of a stream
   shared by every building that uses it.
+- agents derive their exploration and coordination streams the same way ([#287](https://github.com/citylearn-project/CityLearn/issues/287)): `TabularQLearning` and `MARLISA` keep one generator per purpose (exploration, coordination order) for the agent's lifetime and take the version of their environment. In 3.6.0 they drew from `RandomState(random_seed + time_step)` recreated at every step, so seed `s` at step `t + 1` repeated seed `s + 1` at step `t`. For a fixed seed the sequence of exploration decisions and coordination orders changes, so trained Q-tables and MARLISA results differ from 3.6.0 runs; use `v1` to reproduce them;
+- datasets generated with `citylearn.end_use_load_profiles.neighborhood` seed each partial-load simulation from the generator seed, the building and the simulation index instead of `int(building_id) + index`, which repeated simulation `i + 1` of building `b` as simulation `i` of building `b + 1`. Only newly generated datasets change; the bundled datasets are unchanged. `random_stream_version` does not apply to dataset generation.
 
 `reset(seed=s)` repeats the first episode of an environment built with
 `random_seed=s`, and `reset(options={'episode_index': k})` repeats episode `k`.

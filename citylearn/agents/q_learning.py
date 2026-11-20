@@ -1,6 +1,7 @@
 import math
 from typing import Any, List, Tuple
 import numpy as np
+from citylearn import random_streams
 from citylearn.agents.base import Agent, require_flat_interface
 from citylearn.citylearn import CityLearnEnv
 
@@ -70,11 +71,8 @@ class TabularQLearning(Agent):
         
         deterministic = False if deterministic is None else deterministic
         actions = None
-        seed = self.random_seed if self.random_seed is None else self.random_seed + self.time_step
-        nprs = np.random.RandomState(seed)
-        
 
-        if deterministic or nprs.random() > self.epsilon:
+        if deterministic or self._exploration_draw() > self.epsilon:
             # Use q-function to decide action
             actions = self.__exploit(observations)
             self.__explored = False
@@ -91,6 +89,19 @@ class TabularQLearning(Agent):
         self.actions = actions
         self.next_time_step()
         return actions
+
+    def _exploration_draw(self) -> float:
+        """Uniform draw that decides between exploitation and exploration.
+
+        With ``random_stream_version='v2'`` it is the next value of one generator kept for the agent's
+        lifetime. With ``'v1'`` it is the first value of ``RandomState(random_seed + time_step)``, as in
+        CityLearn 3.6.0, so seed ``s`` at step ``t + 1`` repeats seed ``s + 1`` at step ``t``.
+        """
+
+        if self.random_stream_version == random_streams.LEGACY_RANDOM_STREAM_VERSION:
+            return np.random.RandomState(self.random_seed + self.time_step).random()
+
+        return self.random_generator(random_streams.AGENT_EXPLORATION).random()
 
     def __exploit(self, observations: List[List[float]]) -> List[List[float]]:
         """Select deterministic actions from Q-Table i.e. action with max Q-value for given observations."""

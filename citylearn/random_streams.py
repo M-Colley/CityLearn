@@ -10,11 +10,14 @@ vehicles away from their charger, occupant set-point interactions and stochastic
     of them sit at the same quantile; the electric-vehicle drift seed is ``seed + episode``, so
     seed ``s`` in episode 1 repeats seed ``s + 1`` in episode 0; every occupant draws
     ``RandomState(seed + time_step)``, the same value in every building and episode; and
-    stochastic outages skip day 0 and the partial last day and floor their durations.
+    stochastic outages skip day 0 and the partial last day and floor their durations. Agents
+    draw exploration and coordination order from ``RandomState(seed + time_step)``, recreated
+    every step, so seed ``s`` at step ``t + 1`` repeats seed ``s + 1`` at step ``t``.
 ``'v2'`` (default)
     Each stream comes from :class:`numpy.random.SeedSequence` with the seed as entropy and the
     purpose, entity and episode as its spawn key, so streams for different purposes, objects
-    and episodes are independent. Each object keeps one generator per stream.
+    and episodes are independent. Each object keeps one generator per stream, including agents,
+    which keep one exploration and one coordination-order generator for their lifetime.
 """
 
 import hashlib
@@ -33,6 +36,9 @@ EV_AWAY_SOC_DRIFT = 'ev_away_soc_drift'
 EV_SUSPENDED_SOC_DRIFT = 'ev_suspended_soc_drift'
 OCCUPANT_SETPOINT_INTERACTION = 'occupant_setpoint_interaction'
 POWER_OUTAGE = 'power_outage'
+AGENT_EXPLORATION = 'agent_exploration'
+AGENT_COORDINATION_ORDER = 'agent_coordination_order'
+DATASET_PARTIAL_LOAD = 'dataset_partial_load'
 
 
 def parse_random_stream_version(value: Union[str, int, None], path: str = 'random_stream_version') -> str:
@@ -101,3 +107,13 @@ def stream_id(seed: int, purpose: str, *parts: Hashable) -> int:
     """A 32-bit identifier of the stream, for metadata and comparisons; not a seed to draw from."""
 
     return int(seed_sequence(seed, purpose, *parts).generate_state(1, dtype=np.uint32)[0])
+
+
+def partial_load_seed(seed: int, building_id: Union[int, str], simulation_index: int) -> int:
+    """Seed of partial-load simulation `simulation_index` of building `building_id` for dataset generation.
+
+    Replaces ``int(building_id) + simulation_index``, which repeated simulation ``i + 1`` of building ``b``
+    as simulation ``i`` of building ``b + 1``. The result is a 32-bit integer.
+    """
+
+    return stream_id(seed, DATASET_PARTIAL_LOAD, int(building_id), int(simulation_index))

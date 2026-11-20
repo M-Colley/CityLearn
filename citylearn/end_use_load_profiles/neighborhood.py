@@ -22,6 +22,7 @@ from citylearn.dynamics import LSTMDynamics
 from citylearn.end_use_load_profiles.clustering import MetadataClustering
 from citylearn.end_use_load_profiles.lstm_model.model_generation_wrapper import run_one_model
 from citylearn.end_use_load_profiles.simulate import EndUseLoadProfilesEnergyPlusPartialLoadSimulator
+from citylearn import random_streams
 from citylearn.preprocessing import PeriodicNormalization, Normalize
 from citylearn.utilities import FileHandler
 
@@ -763,7 +764,7 @@ class Neighborhood:
                     multiplier_probability=multiplier_probability,
                     simulation_id=_simulation_id,
                     output_directory=_output_directory,
-                    random_seed=int(bldg_id) + i,
+                    random_seed=random_streams.partial_load_seed(self.random_seed, bldg_id, i),
                     **partial_loads_kwargs
                 ))
             

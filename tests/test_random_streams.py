@@ -345,3 +345,143 @@ def test_outages_in_an_env_follow_the_version():
     finally:
         v1.close()
         v2.close()
+
+
+# --- agents and dataset generation (issue #287) -----------------------------------------------
+
+def _agent_schema():
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / 'data' / 'datasets' / 'citylearn_challenge_2022_phase_all'
+    schema = json.loads((root / 'schema.json').read_text(encoding='utf-8'))
+    schema['root_directory'] = str(root)
+
+    return schema
+
+
+def _q_learning_agent(seed, version=None):
+    from citylearn.agents.q_learning import TabularQLearning
+    from citylearn.wrappers import TabularQLearningWrapper
+
+    schema = _agent_schema()
+
+    for name in schema['observations']:
+        schema['observations'][name]['active'] = name == 'hour'
+
+    for name in schema['actions']:
+        schema['actions'][name]['active'] = name == 'electrical_storage'
+
+    first = next(iter(schema['buildings']))
+
+    for name in schema['buildings']:
+        schema['buildings'][name]['include'] = name == first
+
+    env = CityLearnEnv(
+        schema, central_agent=True, episode_time_steps=24, random_seed=seed, random_stream_version=version,
+    )
+    env = TabularQLearningWrapper(env, observation_bin_sizes=[{'hour': 24}], action_bin_sizes=[{'electrical_storage': 3}])
+
+    return TabularQLearning(env)
+
+
+def _exploration_draws(agent, steps):
+    draws = []
+
+    for _ in range(steps):
+        draws.append(agent._exploration_draw())
+        agent.next_time_step()
+
+    return draws
+
+
+def test_v2_q_learning_exploration_does_not_overlap_the_next_seed():
+    steps = 12
+    first = _exploration_draws(_q_learning_agent(5), steps)
+    second = _exploration_draws(_q_learning_agent(6), steps)
+
+    assert not set(first[1:]) & set(second)
+    assert len(set(first)) == steps
+
+
+def test_v1_q_learning_exploration_repeats_the_next_seed_one_step_later():
+    steps = 12
+    first = _exploration_draws(_q_learning_agent(5, 'v1'), steps)
+    second = _exploration_draws(_q_learning_agent(6, 'v1'), steps)
+
+    assert first[1:] == second[:-1]
+
+
+def test_v2_q_learning_exploration_repeats_for_the_same_seed():
+    assert _exploration_draws(_q_learning_agent(5), 8) == _exploration_draws(_q_learning_agent(5), 8)
+
+
+def test_v2_q_learning_keeps_one_generator_across_steps():
+    agent = _q_learning_agent(5)
+    generator = agent.random_generator(random_streams.AGENT_EXPLORATION)
+    state = generator.bit_generator.state
+
+    agent.predict([[0]])
+    agent.predict([[1]])
+
+    assert agent.random_generator(random_streams.AGENT_EXPLORATION) is generator
+    assert generator.bit_generator.state != state
+
+
+def test_agent_inherits_the_environment_random_stream_version():
+    assert _q_learning_agent(5, 'v1').random_stream_version == 'v1'
+    assert _q_learning_agent(5).random_stream_version == 'v2'
+
+
+def _marlisa_orders(seed, version, steps):
+    pytest.importorskip('torch')
+    from citylearn.agents.marlisa import MARLISA
+
+    env = CityLearnEnv(
+        _agent_schema(), central_agent=False, episode_time_steps=24, buildings=[0, 1, 2, 3, 4],
+        random_seed=seed, random_stream_version=version,
+    )
+    agent = MARLISA(env, hidden_dimension=[8, 8])
+    orders = []
+
+    for _ in range(steps):
+        orders.append(agent._coordination_order(5))
+        agent.next_time_step()
+
+    return agent, orders
+
+
+def test_v2_marlisa_coordination_order_does_not_overlap_the_next_seed():
+    _, first = _marlisa_orders(5, None, 12)
+    _, second = _marlisa_orders(6, None, 12)
+
+    assert first[1:] != second[:-1]
+    assert first == _marlisa_orders(5, None, 12)[1]
+    assert len({tuple(o) for o in first}) > 1
+
+
+def test_v1_marlisa_coordination_order_repeats_the_next_seed_one_step_later():
+    _, first = _marlisa_orders(5, 'v1', 12)
+    _, second = _marlisa_orders(6, 'v1', 12)
+
+    assert first[1:] == second[:-1]
+
+
+def test_v2_marlisa_keeps_one_coordination_generator():
+    agent, _ = _marlisa_orders(5, None, 3)
+    generator = agent.random_generator(random_streams.AGENT_COORDINATION_ORDER)
+
+    assert agent.random_generator(random_streams.AGENT_COORDINATION_ORDER) is generator
+
+
+def test_partial_load_seeds_are_distinct_for_consecutive_buildings_and_simulations():
+    seeds = [random_streams.partial_load_seed(7, b, i) for b in range(100, 110) for i in range(10)]
+
+    assert len(set(seeds)) == len(seeds)
+    # The additive seed int(bldg_id) + i repeated (b, i + 1) as (b + 1, i).
+    assert random_streams.partial_load_seed(7, 100, 1) != random_streams.partial_load_seed(7, 101, 0)
+
+
+def test_partial_load_seeds_repeat_and_depend_on_the_seed():
+    assert random_streams.partial_load_seed(7, '100', 2) == random_streams.partial_load_seed(7, 100, 2)
+    assert random_streams.partial_load_seed(7, 100, 2) != random_streams.partial_load_seed(8, 100, 2)

@@ -1,6 +1,7 @@
 from copy import deepcopy
 from typing import Any, List, Mapping, Tuple, Union
 import numpy as np
+from citylearn import random_streams
 from citylearn.agents.base import Agent
 from citylearn.agents.rbc import RBC  # noqa: F401  (kept for code importing RBC from this module)
 from citylearn.agents.sac import SACRBC
@@ -372,14 +373,29 @@ class MARLISA(SAC):
         
         return actions, coordination_variables
 
+    def _coordination_order(self, agent_count: int) -> List[int]:
+        """Random order in which buildings are coordinated at the current time step.
+
+        With ``random_stream_version='v2'`` the shuffle uses one generator kept for the agent's lifetime.
+        With ``'v1'`` it uses ``RandomState(random_seed + time_step)``, as in CityLearn 3.6.0.
+        """
+
+        order = list(range(agent_count))
+
+        if self.random_stream_version == random_streams.LEGACY_RANDOM_STREAM_VERSION:
+            np.random.RandomState(int(self.random_seed + self.time_step)).shuffle(order)
+        else:
+            self.random_generator(random_streams.AGENT_COORDINATION_ORDER).shuffle(order)
+
+        return order
+
     def get_exploration_prediction_with_information_sharing(self, observations: List[List[float]]) -> Tuple[List[List[float]], List[List[float]]]:
         actions, coordination_variables = self.get_exploration_prediction_without_information_sharing(observations)
     
         if self.time_step > self.start_regression_time_step:
             agent_count = len(self.action_dimension)
-            action_order = list(range(agent_count))
-            nprs = np.random.RandomState(int(self.random_seed + self.time_step))
-            nprs.shuffle(action_order)
+            action_order = self._coordination_order(agent_count)
+
             expected_demand = [self.predict_demand(i, o, a) for i, (o, a) in enumerate(zip(observations, actions))]
             coordination_variables = [[
                 (sum(expected_demand) - expected_demand[i])/self.total_coefficient,
