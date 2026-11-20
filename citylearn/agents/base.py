@@ -1,7 +1,8 @@
 import logging
-from typing import Any, List, Mapping
+from typing import Any, List, Mapping, Optional
 from gymnasium import spaces
 import numpy as np
+from citylearn import random_streams
 from citylearn.base import Environment
 from citylearn.citylearn import CityLearnEnv
 
@@ -77,9 +78,19 @@ class Agent(Environment):
             random_seed=self.env.unwrapped.random_seed,
             episode_tracker=self.env.unwrapped.episode_tracker,
             time_step_ratio=self.env.unwrapped.time_step_ratio,
-            random_stream_version=self.env.unwrapped.random_stream_version,
+            random_stream_version=self.__environment_random_stream_version(),
         )
         self.reset()
+
+    def __environment_random_stream_version(self) -> Optional[str]:
+        """Version of the environment's random streams, or None for the default.
+
+        The default is not stored, so agents pickled before the setting existed keep the same attributes.
+        """
+
+        version = self.env.unwrapped.random_stream_version
+
+        return None if version == random_streams.DEFAULT_RANDOM_STREAM_VERSION else version
 
     @property
     def env(self) -> CityLearnEnv:
