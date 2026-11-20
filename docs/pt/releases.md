@@ -5,6 +5,21 @@ O [guia de publicação](publishing.md) descreve o procedimento para mantenedore
 
 ## Por publicar
 
+- **Identidades de invariantes fisicos independentes.** Com
+  `physics_invariant_checks=True`, cada edificio e step verifica tambem que
+  eletricidade vezes COP (ou eficiencia) e igual a saida do dispositivo mais a
+  carga do armazenamento termico em arrefecimento, aquecimento e AQS, que o calor
+  e a carga nao deslocavel servidos nao excedem a procura, que o SOC da bateria
+  nao desce abaixo da reserva de profundidade de descarga e que, durante uma
+  falha de energia, a descarga da bateria e dos veiculos nao deixa PV cortada
+  (fisica versao 2 ou superior). O balanco liquido recalculava o liquido a partir
+  dos mesmos vetores, pelo que somar 100 kWh ao dispositivo de carga nao
+  deslocavel de `tests/data/minute_ev_demo` passava; agora levanta
+  `PhysicsInvariantError`. Os checks nao alteraram nenhum resultado. Execucoes de
+  168 passos nos datasets incluidos, no passo nativo e a 900 s, com e sem
+  falhas, passaram com um residuo maximo de 2,1e-5 kWh
+  ([#277](https://github.com/citylearn-project/CityLearn/issues/277),
+  [#289](https://github.com/citylearn-project/CityLearn/issues/289)).
 - **Agentes genéricos na interface de entidades.** Na interface de entidades os
   espaços de ações e de observações são dicionários de tabelas de entidades, pelo
   que `Agent` e `ZeroActionBaselineAgent` falhavam com `AttributeError` no

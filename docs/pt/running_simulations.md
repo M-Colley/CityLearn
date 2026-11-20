@@ -143,6 +143,21 @@ Todas as comunidades tem de partilhar `seconds_per_time_step`, episode length ef
 | `physics_version` | int | schema/2 | Versao da fisica; `1` reproduz o CityLearn 3.6.0. |
 | `metrics_log_interval` | int | schema/0 | Frequencia de logs de metricas runtime. |
 
+## Checks de Invariantes Fisicos
+
+Com `physics_invariant_checks=True`, cada step verifica cada edificio e levanta `PhysicsInvariantError` (subclasse de `AssertionError`) com o edificio, o step, a identidade e os valores. Estados nao finitos sao violacoes. As energias sao kWh por passo de controlo; a tolerancia e 5e-4 kWh mais 1e-6 dos valores comparados.
+
+| Identidade | Significado |
+|---|---|
+| Balanco liquido | O consumo liquido e igual a soma dos consumos de dispositivos, armazenamento, carregadores, aparelhos e escadas rolantes mais a PV (ignorado durante uma falha de energia). |
+| Balanco local na falha | Durante uma falha, as cargas locais nao excedem a PV, a bateria e os veiculos. |
+| `*_heat_le/ge_output_plus_charge` | Para arrefecimento, aquecimento e AQS: eletricidade vezes COP (bomba de calor) ou eficiencia (aquecedor eletrico) e igual a saida do dispositivo mais a carga do armazenamento termico. Durante uma falha so vale o limite superior, porque o fornecimento pode cortar a eletricidade. |
+| `*_served_le_demand` | O calor servido (saida do dispositivo mais descarga do armazenamento) e a carga nao deslocavel servida nao excedem a procura. |
+| `battery_soc_ge_reserve` | O SOC da bateria nao desce abaixo da reserva de profundidade de descarga (`1 - depth_of_discharge`), exceto pela perda em espera de um passo ou se o SOC inicial for menor. |
+| `outage_discharge_le_load_after_pv` | Durante uma falha, a descarga da bateria e dos veiculos nao deixa PV cortada, logo nao ha energia armazenada enviada para a rede em falha. Fisica versao 2 ou superior; a versao 1 regista o excedente como corte de PV (#229). |
+
+Estas identidades leem registos que o balanco liquido nao usa, pelo que um valor errado num modelo de dispositivo e detetado mesmo quando o liquido fecha. Os checks nao alteram resultados. `env._physics_invariant_service.max_residuals` guarda o maior excesso de cada identidade.
+
 ## Payload de Observacoes para Reward
 
 O `step()` constroi um payload de observacoes mais pequeno para o reward quando a reward function declara que nomes de observacao precisa. Os rewards built-in ja fazem isto. Rewards externos podem optar por um destes formatos compativeis:

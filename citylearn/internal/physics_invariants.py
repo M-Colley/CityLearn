@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Iterable
 
 import numpy as np
 
+from citylearn.energy_model import Battery, HeatPump
 from citylearn.internal.physics_version import physics_version_of
 from citylearn.internal.units import power_kw_to_energy_kwh
 
@@ -24,10 +25,16 @@ class CityLearnPhysicsInvariantService:
 
     SOC_EPS = 1.0e-4
     ENERGY_EPS = 5.0e-4
+    # Share of the compared magnitudes added to ENERGY_EPS: series are float32 (relative precision 1.2e-7),
+    # so the absolute tolerance alone is too tight for buildings that move thousands of kWh per step.
+    RELATIVE_EPS = 1.0e-6
 
     def __init__(self, env: "CityLearnEnv"):
         self.env = env
         self._battery_energy_before_actions = None
+        # Largest violation of each identity so far, in kWh (SOC units for the battery reserve); at most
+        # the tolerance when the checks pass. Read by the bundled-data audit.
+        self.max_residuals = {}
 
     def capture_battery_energy_before_actions(self, time_step: int):
         """Snapshot actual SOC after arrivals/losses and before control actions.
@@ -69,6 +76,21 @@ class CityLearnPhysicsInvariantService:
     def _require(condition: bool, message: str):
         if not condition:
             raise PhysicsInvariantError(message)
+
+    def _require_at_most(self, identity: str, excess: float, tolerance: float, message: str):
+        """Record ``excess`` (left side minus right side) of ``identity`` and raise when it exceeds ``tolerance``."""
+
+        if excess > self.max_residuals.get(identity, -np.inf):
+            self.max_residuals[identity] = excess
+
+        if excess > tolerance:
+            raise PhysicsInvariantError(f'{message} Identity: {identity}.')
+
+    @classmethod
+    def _tolerance(cls, *magnitudes: float) -> float:
+        """Absolute tolerance in kWh for a comparison of values of the given magnitudes."""
+
+        return cls.ENERGY_EPS + cls.RELATIVE_EPS*max((abs(value) for value in magnitudes), default=0.0)
 
     @staticmethod
     def _state(values, idx: int, name: str, default: float = 0.0) -> float:
@@ -129,6 +151,10 @@ class CityLearnPhysicsInvariantService:
             for check in (
                 self._assert_building_energy_balance,
                 self._assert_outage_local_balance,
+                self._assert_outage_no_storage_spill,
+                self._assert_thermal_energy_identity,
+                self._assert_served_within_demand,
+                self._assert_battery_reserve,
                 self._assert_soc_bounds,
                 self._assert_storage_power_bounds,
                 self._assert_charger_power_bounds,
@@ -204,6 +230,119 @@ class CityLearnPhysicsInvariantService:
                 f"Outage storage discharge exceeds the load not covered by PV for '{building.name}' at t={t}: "
                 f"discharge={storage_discharge:.6f} kWh, uncovered_load={uncovered_load:.6f} kWh."
             ))
+
+    @staticmethod
+    def _thermal_end_uses(building):
+        """Yield ``(name, device, storage, demand, dataset_output, heating)`` per thermal end use."""
+
+        yield ('cooling', building.cooling_device, building.cooling_storage, building.cooling_demand,
+               building.energy_from_cooling_device, False)
+        yield ('heating', building.heating_device, building.heating_storage, building.heating_demand,
+               building.energy_from_heating_device, True)
+        yield ('dhw', building.dhw_device, building.dhw_storage, building.dhw_demand,
+               building.energy_from_dhw_device, True)
+
+    @staticmethod
+    def _cop(device, building, t: int, heating: bool) -> float:
+        """Coefficient of performance of a heat pump, or the efficiency of an electric heater."""
+
+        if isinstance(device, HeatPump):
+            return float(device.get_cop(float(building.weather.outdoor_dry_bulb_temperature[t]), heating))
+
+        return float(device.efficiency)
+
+    def _assert_thermal_energy_identity(self, building, t: int):
+        """Electricity x COP (or efficiency) equals the device output to the building plus the storage charge.
+
+        The two sides come from different records: the electricity consumption of the device, and the thermal
+        energy it delivered (`energy_from_*_device`) and stored (`energy_balance`). A wrong value in a device
+        model breaks the identity even when the net balance still closes. An outage can only clip the
+        electricity of a device, so the identity is an upper bound then.
+        """
+
+        outage = bool(getattr(building, 'power_outage', False))
+
+        for name, device, storage, _, dataset_output, heating in self._thermal_end_uses(building):
+            electricity = self._state(device.electricity_consumption, t, f'{name} electricity consumption')
+            output = building._dataset_energy_to_control_step(self._state(dataset_output, t, f'{name} device output'))
+            charge = max(self._state(storage.energy_balance, t, f'{name} storage energy balance'), 0.0)
+            heat = electricity*self._cop(device, building, t, heating)
+            expected = max(output, 0.0) + charge
+            tolerance = self._tolerance(heat, expected)
+            message = (
+                f"Thermal energy identity violated for '{building.name}' at t={t} ({name}): "
+                f"electricity*COP={heat:.6f} kWh, device_output+storage_charge={expected:.6f} kWh "
+                f"(electricity={electricity:.6f} kWh, device_output={output:.6f} kWh, storage_charge={charge:.6f} kWh)."
+            )
+            self._require_at_most(f'{name}_heat_le_output_plus_charge', heat - expected, tolerance, message)
+
+            if not outage:
+                self._require_at_most(f'{name}_heat_ge_output_plus_charge', expected - heat, tolerance, message)
+
+    def _assert_served_within_demand(self, building, t: int):
+        """Heat delivered to the building (device output plus storage discharge) and the served
+        non-shiftable load never exceed the demand."""
+
+        for name, device, storage, demand_series, _, heating in self._thermal_end_uses(building):
+            demand = building._dataset_energy_to_control_step(self._state(demand_series, t, f'{name} demand'))
+            balance = self._state(storage.energy_balance, t, f'{name} storage energy balance')
+            electricity = self._state(device.electricity_consumption, t, f'{name} electricity consumption')
+            served = electricity*self._cop(device, building, t, heating) - max(balance, 0.0) + max(-balance, 0.0)
+            self._require_at_most(f'{name}_served_le_demand', served - demand, self._tolerance(served, demand), (
+                f"Served {name} energy exceeds the demand for '{building.name}' at t={t}: "
+                f"served={served:.6f} kWh, demand={demand:.6f} kWh."
+            ))
+
+        load = building._dataset_energy_to_control_step(self._state(building.non_shiftable_load, t, 'non-shiftable load'))
+        served = self._state(building.non_shiftable_load_device.electricity_consumption, t,
+                             'non-shiftable load electricity consumption')
+        self._require_at_most('non_shiftable_served_le_demand', served - load, self._tolerance(served, load), (
+            f"Served non-shiftable load exceeds the demand for '{building.name}' at t={t}: "
+            f"served={served:.6f} kWh, demand={load:.6f} kWh."
+        ))
+
+    def _assert_battery_reserve(self, building, t: int):
+        """The stationary battery never discharges below its depth-of-discharge reserve.
+
+        The standby loss acts on the stored energy before the control action, so an idle battery at the
+        reserve drifts below it. The floor is therefore the lower of the reserve and the previous SOC after
+        one step of standby loss (the initial SOC at the first step).
+        """
+
+        battery = getattr(building, 'electrical_storage', None)
+        if not isinstance(battery, Battery) or float(battery.capacity) <= 0.0:
+            return
+
+        previous = (float(battery.initial_soc) if t == 0
+                    else self._state(battery.soc, t - 1, 'electrical storage SOC')*(1.0 - float(battery.loss_coefficient)))
+        floor = min(1.0 - float(battery.depth_of_discharge), previous)
+        soc = self._state(battery.soc, t, 'electrical storage SOC')
+        self._require_at_most('battery_soc_ge_reserve', floor - soc, self.SOC_EPS, (
+            f"Battery SOC below the depth-of-discharge reserve for '{building.name}' at t={t}: "
+            f"soc={soc:.6f}, floor={floor:.6f} (depth_of_discharge={float(battery.depth_of_discharge):.3f})."
+        ))
+
+    def _assert_outage_no_storage_spill(self, building, t: int):
+        """During an outage, battery and vehicle discharge never exceed the local load that PV leaves.
+
+        Uses the PV curtailment the building recorded, not the load arrays: discharge that no local load
+        needs leaves PV curtailed, which is a spill to the failed grid. Physics version 1 books that
+        surplus as curtailment by design (#229).
+        """
+
+        if (not bool(getattr(building, 'simulate_power_outage', False))
+                or self._safe_index(getattr(building, 'power_outage_signal', []), t, 0.0) < 1.0
+                or physics_version_of(building) < 2):
+            return
+
+        discharge = (max(-self._state(building.electrical_storage.electricity_consumption, t, 'electrical storage'), 0.0)
+                     + max(-self._state(building.chargers_electricity_consumption, t, 'chargers'), 0.0))
+        curtailment = self._state(building.pv_curtailment, t, 'PV curtailment')
+        excess = min(discharge, curtailment) if discharge > self.ENERGY_EPS else 0.0
+        self._require_at_most('outage_discharge_le_load_after_pv', excess, self._tolerance(discharge, curtailment), (
+            f"Outage storage spill for '{building.name}' at t={t}: discharge={discharge:.6f} kWh "
+            f"while pv_curtailment={curtailment:.6f} kWh."
+        ))
 
     def _assert_soc_bounds(self, building, t: int):
         storages = [

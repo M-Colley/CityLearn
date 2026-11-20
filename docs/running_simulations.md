@@ -140,8 +140,23 @@ All communities must share `seconds_per_time_step`, effective episode length, `i
 | `render` | bool | derived | Legacy render switch. |
 | `debug_timing` | bool | schema/False | Runtime timing logs. |
 | `check_observation_limits` | bool | schema/False | Validate observations against estimated bounds. |
-| `physics_invariant_checks` | bool | schema/False | Run physical invariant checks at runtime. |
+| `physics_invariant_checks` | bool | schema/False | Run physical invariant checks at runtime, see [Physics Invariant Checks](#physics-invariant-checks). |
 | `metrics_log_interval` | int | schema/0 | Runtime metric log cadence. |
+
+## Physics Invariant Checks
+
+With `physics_invariant_checks=True`, every step checks each building and raises `PhysicsInvariantError` (a subclass of `AssertionError`) that names the building, the step, the identity and the values. Non-finite states are violations. Energies are control-step kWh; the tolerance is 5e-4 kWh plus 1e-6 of the compared values.
+
+| Identity | Meaning |
+|---|---|
+| Net balance | Net consumption equals the sum of device, storage, charger, appliance and escalator consumption and PV (skipped during an outage). |
+| Outage local balance | During an outage, local loads do not exceed PV, battery and vehicle supply. |
+| `*_heat_le/ge_output_plus_charge` | For cooling, heating and DHW: electricity times COP (heat pump) or efficiency (electric heater) equals the device output to the building plus the thermal storage charge. During an outage only the upper bound holds, because the supply can clip the electricity. |
+| `*_served_le_demand` | Heat served (device output plus storage discharge) for cooling, heating and DHW, and the served non-shiftable load, do not exceed the demand. |
+| `battery_soc_ge_reserve` | The battery SOC does not fall below the depth-of-discharge reserve (`1 - depth_of_discharge`), except by one step of standby loss per step or when the initial SOC is lower. |
+| `outage_discharge_le_load_after_pv` | During an outage, battery and vehicle discharge leave no PV curtailed, so no stored energy spills to the failed grid. Physics version 2 and later; version 1 books the surplus as curtailment (#229). |
+
+The thermal, demand, reserve and spill identities read records the net balance does not use, so a wrong value in one device model is detected even when the net still closes. The checks do not change results. `env._physics_invariant_service.max_residuals` holds the largest excess of each identity so far.
 
 ## Reward Observation Payloads
 

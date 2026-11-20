@@ -8,3 +8,4 @@ pyarrow
 nrel-pysam; python_version < "3.14"
 pytest
 ruff
+hypothesis
