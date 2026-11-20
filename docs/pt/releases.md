@@ -5,6 +5,7 @@ O [guia de publicação](publishing.md) descreve o procedimento para mantenedore
 
 ## Por publicar
 
+- **Ficheiros de janela de membro para membros que saem e voltam a entrar.** Na topologia dinâmica, um ficheiro de membro mais curto que o dataset pode agora conter as janelas ativas concatenadas de um membro que sai e volta a entrar, com uma linha por timestep ativo do dataset, pela ordem dos eventos. O carregador coloca cada janela no timestep do respetivo `add_member`, e um ficheiro cujo comprimento não é a soma das janelas dá um `ValueError` com as linhas esperadas e reais e as janelas. Antes, esse membro dava `ValueError` se os ficheiros não fossem full-horizon. Os ficheiros full-horizon e os membros com uma só ativação são lidos como antes, e nenhum dataset incluído tem membros que voltam a entrar, pelo que os resultados não mudam ([#286](https://github.com/citylearn-project/CityLearn/issues/286)).
 - **Agentes genéricos na interface de entidades.** Na interface de entidades os
   espaços de ações e de observações são dicionários de tabelas de entidades, pelo
   que `Agent` e `ZeroActionBaselineAgent` falhavam com `AttributeError` no

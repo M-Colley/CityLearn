@@ -175,14 +175,14 @@ def test_short_member_file_that_ends_early_warns(tmp_path):
     assert building.energy_simulation.non_shiftable_load[200] == pytest.approx(frame["non_shiftable_load"].iloc[99])
 
 
-def test_rejoining_member_requires_a_full_horizon_file():
+def test_rejoining_member_with_an_unrelated_short_file_raises():
     events = [
         {"id": "join", "time_step": 1000, "operation": "add_member", "target_member_id": "Building_18"},
         {"id": "leave", "time_step": 1010, "operation": "remove_member", "target_member_id": "Building_18"},
         {"id": "rejoin", "time_step": 1020, "operation": "add_member", "target_member_id": "Building_18"},
     ]
 
-    with pytest.raises(ValueError, match="joins again after leaving"):
+    with pytest.raises(ValueError, match=r"has 2200 rows, but the member is active in 2 windows"):
         CityLearnEnv(
             _schema(TOPOLOGY_DEMO, topology_events=events),
             simulation_start_time_step=990, simulation_end_time_step=1030, random_seed=0,
@@ -333,3 +333,129 @@ def test_dataset_step_is_inferred_from_every_row():
     mixed_minutes = np.concatenate([np.tile([0, 15, 30, 45], 4), np.zeros(12, dtype=int)])
     with pytest.raises(ValueError, match="mix cadences"):
         EnergySimulation.infer_time_step_seconds(mixed_hour, mixed_minutes)
+
+
+# --- #286: members that leave and rejoin with member-window files ------------------------------------
+
+REJOIN_EVENTS = [
+    {"id": "join", "time_step": 1000, "operation": "add_member", "target_member_id": "Building_18"},
+    {"id": "leave", "time_step": 1010, "operation": "remove_member", "target_member_id": "Building_18"},
+    {"id": "rejoin", "time_step": 1020, "operation": "add_member", "target_member_id": "Building_18"},
+    {"id": "leave_again", "time_step": 1040, "operation": "remove_member", "target_member_id": "Building_18"},
+]
+REJOIN_SPANS = [(1000, 1010), (1020, 1040)]
+
+
+def _concatenated_rows(frame: pd.DataFrame, spans) -> pd.DataFrame:
+    """Rows of the member-window file `frame` (row 0 = global step 1000) for each span, concatenated.
+
+    Each span reads from a different offset of the original file, so every active step has a distinct row.
+    """
+
+    return pd.concat(
+        [frame.iloc[start - 1000 + 100 * index: end - 1000 + 100 * index] for index, (start, end) in enumerate(spans)],
+        ignore_index=True,
+    )
+
+
+def _rejoin_dataset(tmp_path: Path, spans=REJOIN_SPANS, drop_rows: int = 0):
+    """Copy of the dynamic demo whose Building_18 files hold the concatenated activation windows."""
+
+    root = _copy_dataset(tmp_path, TOPOLOGY_DEMO)
+    frame = _concatenated_rows(pd.read_csv(root / "Building_18.csv"), spans)
+    frame.iloc[:len(frame) - drop_rows].to_csv(root / "Building_18.csv", index=False)
+    charger = _concatenated_rows(pd.read_csv(root / "charger_18_1.csv"), spans)
+    charger.iloc[:len(charger) - drop_rows].to_csv(root / "charger_18_1.csv", index=False)
+    return root, frame
+
+
+def _expected_rejoin_load(frame, spans=REJOIN_SPANS):
+    expected, offset = {}, 0
+
+    for start, end in spans:
+        for step in range(start, end):
+            expected[step] = frame["non_shiftable_load"].iloc[offset + step - start]
+        offset += end - start
+
+    return expected
+
+
+@pytest.mark.parametrize(
+    "window", [(990, 1050), (1005, 1030), (1012, 1025), (1025, 1045), (0, 1100), (1100, 1200), (0, 500)],
+)
+def test_rejoining_member_reads_the_concatenated_window_file(tmp_path, window):
+    root, frame = _rejoin_dataset(tmp_path)
+    start, end = window
+    env = CityLearnEnv(
+        _schema(root, topology_events=REJOIN_EVENTS), simulation_start_time_step=start, simulation_end_time_step=end,
+        random_seed=0,
+    )
+    load = env._topology_service.member_pool["Building_18"].energy_simulation.non_shiftable_load
+
+    assert len(load) == end - start + 1
+    for step, value in _expected_rejoin_load(frame).items():
+        if start <= step <= end:
+            assert load[step - start] == pytest.approx(value)
+
+
+def test_rejoining_member_is_observed_at_each_activation(tmp_path):
+    root, frame = _rejoin_dataset(tmp_path)
+    expected = _expected_rejoin_load(frame)
+    env = CityLearnEnv(
+        _schema(root, topology_events=REJOIN_EVENTS),
+        simulation_start_time_step=990, simulation_end_time_step=1050, random_seed=0,
+    )
+    env.reset()
+    building = env._topology_service.member_pool["Building_18"]
+    active = []
+
+    while not env.terminated:
+        step = 990 + env.time_step
+        if "Building_18" in [b.name for b in env.buildings]:
+            active.append(step)
+        env.step(_zero_entity_actions(env))
+
+    assert active == sorted(expected)
+    recorded = np.array(building.non_shiftable_load, dtype=float)
+    for step in (1000, 1009, 1020, 1039):
+        assert recorded[step - 990] == pytest.approx(expected[step])
+
+
+@pytest.mark.parametrize("episode", [(995, 1025), (1025, 1045)])
+def test_rejoining_member_with_episode_splits(tmp_path, episode):
+    root, frame = _rejoin_dataset(tmp_path)
+    env = CityLearnEnv(
+        _schema(root, topology_events=REJOIN_EVENTS), simulation_start_time_step=990, simulation_end_time_step=1050,
+        episode_time_steps=[episode], random_seed=0,
+    )
+    load = env._topology_service.member_pool["Building_18"].energy_simulation.non_shiftable_load
+    start, end = episode
+
+    assert len(load) == end - start + 1
+    for step, value in _expected_rejoin_load(frame).items():
+        if start <= step <= end:
+            assert load[step - start] == pytest.approx(value)
+
+
+def test_rejoining_member_file_with_a_wrong_length_raises(tmp_path):
+    root, _ = _rejoin_dataset(tmp_path, drop_rows=1)
+
+    with pytest.raises(ValueError, match=r"has 29 rows.*2 windows.*need 30 rows"):
+        CityLearnEnv(
+            _schema(root, topology_events=REJOIN_EVENTS), simulation_start_time_step=990,
+            simulation_end_time_step=1050, random_seed=0,
+        )
+
+
+def test_rejoining_member_with_a_full_horizon_file_is_unchanged(tmp_path):
+    root = _copy_dataset(tmp_path, TOPOLOGY_DEMO)
+    original = pd.read_csv(root / "Building_18.csv")
+    full = pd.concat([original.iloc[[0] * 1000], original, original.iloc[[-1] * (8760 - 3200)]], ignore_index=True)
+    assert len(full) == 8760
+    full.to_csv(root / "Building_18.csv", index=False)
+    schema = _schema(root, topology_events=REJOIN_EVENTS)
+    schema["buildings"]["Building_18"]["chargers"] = {}
+    env = CityLearnEnv(schema, simulation_start_time_step=990, simulation_end_time_step=1050, random_seed=0)
+    load = env._topology_service.member_pool["Building_18"].energy_simulation.non_shiftable_load
+
+    np.testing.assert_allclose(load, full["non_shiftable_load"].iloc[990:1051])

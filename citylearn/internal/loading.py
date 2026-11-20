@@ -37,12 +37,15 @@ class MemberWindow(NamedTuple):
     """Active window of a dynamic-topology member source, in global dataset time steps.
 
     `start` is the first activation and `end` (exclusive) the end of that activation, clipped to the
-    simulation end. `rejoins` is true when the member is activated again after leaving.
+    simulation end. `rejoins` is true when the member is activated again after leaving, and then
+    `activations` lists every active window `(start, end)` in event order, each end clipped to the
+    dataset horizon, which is the layout of a concatenated member-window file.
     """
 
     start: int
     end: int
     rejoins: bool = False
+    activations: Tuple[Tuple[int, int], ...] = ()
 
 
 @dataclass
@@ -1198,6 +1201,7 @@ class CityLearnLoadingService:
             active = bool(include)
             activations = [0] if active else []
             first_end = None
+            ends = []
 
             for event in events:
                 if event.get('target_member_id') != member_id:
@@ -1210,6 +1214,7 @@ class CityLearnLoadingService:
                     activations.append(time_step)
                 elif operation == 'remove_member' and active:
                     active = False
+                    ends.append(time_step)
                     if first_end is None:
                         first_end = time_step
 
@@ -1222,9 +1227,28 @@ class CityLearnLoadingService:
 
             start = max(0, int(activations[0]))
             end = simulation_end if first_end is None else min(int(first_end), simulation_end)
-            windows[str(member_id)] = MemberWindow(start, max(start, end), rejoins)
+            spans = ()
+            if rejoins:
+                spans = self._activation_spans(activations, ends, self._dataset_row_count(schema))
+            windows[str(member_id)] = MemberWindow(start, max(start, end), rejoins, spans)
 
         return windows
+
+    @staticmethod
+    def _activation_spans(starts: List[int], ends: List[int], horizon: int) -> Tuple[Tuple[int, int], ...]:
+        """Active windows `(start, end)` in event order, clipped to `[0, horizon)`, without empty ones."""
+
+        spans = []
+
+        for index, start in enumerate(starts):
+            start = max(0, int(start))
+            end = int(ends[index]) if index < len(ends) else int(horizon)
+            end = min(end, int(horizon))
+
+            if end > start:
+                spans.append((start, end))
+
+        return tuple(spans)
 
     def _build_dynamic_charger_windows(
         self,
@@ -1241,7 +1265,7 @@ class CityLearnLoadingService:
             if member_window is None:
                 continue
 
-            base_start, base_end, rejoins = member_window
+            base_start, base_end, rejoins, base_spans = member_window
             chargers = (member_schema or {}).get('chargers', {}) or {}
 
             for charger_id in chargers.keys():
@@ -1261,9 +1285,32 @@ class CityLearnLoadingService:
                         end = min(end, candidate)
                         break
 
-                windows[(str(member_id), str(charger_id))] = MemberWindow(start, max(start, end), rejoins)
+                spans = tuple(
+                    (span_start, self._charger_span_end(events, member_id, charger_id, span_start, span_end))
+                    for span_start, span_end in base_spans
+                )
+                spans = tuple((a, b) for a, b in spans if b > a)
+                windows[(str(member_id), str(charger_id))] = MemberWindow(start, max(start, end), rejoins, spans)
 
         return windows
+
+    @staticmethod
+    def _charger_span_end(
+        events: List[Mapping[str, Any]], member_id: str, charger_id: str, start: int, end: int,
+    ) -> int:
+        """End of a member activation for a charger, cut at its first `remove_asset` event from `start`."""
+
+        for event in events:
+            if (
+                str(event.get('operation', '')).strip().lower() == 'remove_asset'
+                and str(event.get('target_asset_type', '')).strip().lower() == 'charger'
+                and event.get('target_member_id') == member_id
+                and event.get('target_asset_id') == charger_id
+                and int(event.get('time_step', 0)) >= start
+            ):
+                return min(end, int(event.get('time_step', 0)))
+
+        return end
 
     def _read_member_timeseries(
         self,
@@ -1287,9 +1334,12 @@ class CityLearnLoadingService:
         A full-horizon file is sliced to the simulation window like any other file. A member-window
         file is read from the row that corresponds to the later of the activation and the simulation
         start, and placed at that offset of the simulation window; its values are carried backwards
-        before the activation and forwards after the member leaves, where the member is inactive. A
-        member that joins again after leaving needs a full-horizon file, because a member-window file
-        only covers its first activation.
+        before the activation and forwards after the member leaves, where the member is inactive.
+
+        A member that joins again after leaving has several activations. Its member-window file holds
+        one row per active dataset time step of each activation, concatenated in event order, so its
+        length is the sum of the activation lengths, each clipped to the dataset horizon. Each activation
+        is placed at its global time step; any other length raises a `ValueError`.
         """
 
         if not self._dynamic_mode or window is None:
@@ -1297,8 +1347,7 @@ class CityLearnLoadingService:
 
         expected_rows = int(expected_rows)
         simulation_start = int(schema['simulation_start_time_step'])
-        join, end, rejoins = window
-        join, end = int(join), int(end)
+        join, end, rejoins = int(window[0]), int(window[1]), bool(window[2])
 
         if not self._is_member_window_file(schema, filepath, window):
             dataframe = self._read_simulation_dataframe(schema, filepath, csv_dtypes=csv_dtypes)
@@ -1325,10 +1374,9 @@ class CityLearnLoadingService:
             return self._place_member_rows(dataframe, expected_rows=expected_rows, local_start=0)
 
         if rejoins:
-            raise ValueError(
-                f'{source_label} is shorter than the dataset, so it is read as starting at the member\'s '
-                f'add_member time step ({join}), but the member joins again after leaving. Provide a '
-                'full-horizon file, with one row per dataset time step, for a member that rejoins.'
+            return self._read_rejoining_member_rows(
+                schema, filepath, window, expected_rows=expected_rows, source_label=source_label,
+                csv_dtypes=csv_dtypes,
             )
 
         first = max(join, simulation_start)
@@ -1377,6 +1425,66 @@ class CityLearnLoadingService:
             dataframe, expected_rows=expected_rows, local_start=first - simulation_start,
         )
 
+    def _read_rejoining_member_rows(
+        self,
+        schema: Mapping[str, Any],
+        filepath: Union[str, os.PathLike],
+        window: MemberWindow,
+        *,
+        expected_rows: int,
+        source_label: str,
+        csv_dtypes: Optional[Mapping[str, Any]] = None,
+    ) -> pd.DataFrame:
+        """Place the concatenated activation rows of a rejoining member in the simulation window."""
+
+        simulation_start = int(schema['simulation_start_time_step'])
+        simulation_end = simulation_start + int(expected_rows)
+        spans = list(window.activations)
+        file_rows = self._timeseries_row_count(filepath)
+        expected = sum(end - start for start, end in spans)
+
+        if file_rows != expected:
+            raise ValueError(
+                f'{source_label} has {file_rows} rows, but the member is active in {len(spans)} windows '
+                f'{spans} (start, end exclusive; dataset time steps), which need {expected} rows. A file '
+                'shorter than the dataset holds one row per active time step of each window, concatenated '
+                'in event order; a full-horizon file has one row per dataset time step.'
+            )
+
+        parts = []
+        offset = 0
+        reference = 0
+
+        for start, end in spans:
+            first, last = max(start, simulation_start), min(end, simulation_end)
+
+            if last > first:
+                row = offset + first - start
+                frame = self._read_timeseries_dataframe(
+                    filepath, start_time_step=row, end_time_step=row + last - first - 1, csv_dtypes=csv_dtypes,
+                )
+                parts.append((first - simulation_start, frame))
+            elif end <= simulation_start:
+                reference = offset + end - start - 1
+
+            offset += end - start
+
+        if len(parts) == 0:
+            # Never active in this simulation window; only read for sizing, so the nearest row stands in.
+            frame = self._read_timeseries_dataframe(
+                filepath, start_time_step=reference, end_time_step=reference, csv_dtypes=csv_dtypes,
+            )
+            return self._place_member_rows(frame, expected_rows=expected_rows, local_start=0)
+
+        aligned = pd.DataFrame(index=np.arange(expected_rows), columns=parts[0][1].columns)
+        for local_start, frame in parts:
+            aligned.iloc[local_start:local_start + len(frame), :] = frame.to_numpy()
+        for column in aligned.columns:
+            with pd.option_context('future.no_silent_downcasting', True):
+                aligned[column] = aligned[column].ffill().bfill()
+
+        return aligned.reset_index(drop=True)
+
     def _is_member_window_file(
         self,
         schema: Mapping[str, Any],
@@ -1388,7 +1496,7 @@ class CityLearnLoadingService:
         return (
             self._dynamic_mode
             and window is not None
-            and int(window[0]) > 0
+            and (int(window[0]) > 0 or bool(window[2]))
             and self._timeseries_row_count(filepath) < self._dataset_row_count(schema)
         )
 
