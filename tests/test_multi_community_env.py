@@ -366,6 +366,89 @@ def test_portfolio_ratios_to_a_reference_are_ratios_of_summed_totals(weight_b):
         env.close()
 
 
+def _pooled_check(kpis: pd.DataFrame, name: str, numerators, denominators, weight_b: float):
+    """The portfolio value is the ratio of summed district components, not the weighted mean."""
+    portfolio = MultiCommunityEnv.PORTFOLIO_COMMUNITY_ID
+    communities = ("community_a", "community_b")
+
+    def total(names):
+        return sum(
+            _kpi_value(kpis, f"district_{item}", community_id=community, level="district")
+            for community in communities for item in names
+        )
+
+    denominator = total(denominators)
+    assert denominator > 0.0
+    expected = total(numerators)/denominator
+    pooled = _kpi_value(kpis, f"portfolio_{name}", community_id=portfolio, level="portfolio")
+    assert pooled == pytest.approx(expected)
+
+    local = [_kpi_value(kpis, f"district_{name}", community_id=c, level="district") for c in communities]
+    mean = (local[0] + weight_b*local[1])/(1.0 + weight_b)
+    assert abs(mean - expected) > 1.0e-3
+
+
+def test_portfolio_demand_response_compliance_is_pooled_from_energy(tmp_path: Path):
+    """#285: credited over valid requested energy, not a community-weighted mean of the ratios."""
+    schema_a = _copy_dr_schema(tmp_path, "community_a_dataset", "dr_a", target_power_kw=0.5)
+    schema_b = _copy_dr_schema(tmp_path, "community_b_dataset", "dr_b", target_power_kw=50.0)
+    env = MultiCommunityEnv(
+        communities=[
+            _community("community_a", schema=schema_a, interface="entity", weight=1.0),
+            _community("community_b", schema=schema_b, interface="entity", weight=3.0),
+        ]
+    )
+    try:
+        env.reset(seed=0)
+        while int(env.time_step) < 5:
+            env.step(_multi_zero_actions(env))
+        kpis = env.evaluate_v2(include_business_as_usual=False)
+        _pooled_check(
+            kpis, "demand_response_compliance_ratio",
+            ["demand_response_credited_total_kwh"], ["demand_response_valid_requested_total_kwh"], 3.0,
+        )
+    finally:
+        env.close()
+
+
+def test_portfolio_community_market_shares_are_pooled_from_energy(tmp_path: Path):
+    """#285: local shares of demand and export are ratios of summed energy."""
+    from test_kpi_v2 import _build_two_building_market_schema
+
+    path_a = _build_two_building_market_schema(tmp_path / "a")
+    path_b = _build_two_building_market_schema(tmp_path / "b")
+    # Community a exports less than it imports (local share of demand 0.5, of export 1.0),
+    # community b more (local share of demand 1.0, of export 0.5).
+    for path, generation in ((path_a, 1000.0), (path_b, 4000.0)):
+        building_b = pd.read_csv(path.parent / "Building_B.csv")
+        building_b["solar_generation"] = generation
+        building_b.to_csv(path.parent / "Building_B.csv", index=False)
+
+    env = MultiCommunityEnv(
+        communities=[
+            _community("community_a", schema=path_a, episode_time_steps=2, weight=1.0),
+            _community("community_b", schema=path_b, episode_time_steps=2, weight=3.0),
+        ]
+    )
+    try:
+        env.reset(seed=0)
+        env.step(_multi_zero_actions(env))
+        kpis = env.evaluate_v2(include_business_as_usual=False)
+        market = "energy_grid_community_market_"
+        demand = ([f"{market}local_import_total_kwh"],
+                  [f"{market}local_import_total_kwh", f"{market}grid_import_after_local_total_kwh"])
+        export = ([f"{market}local_export_total_kwh"],
+                  [f"{market}local_export_total_kwh", f"{market}grid_export_after_local_total_kwh"])
+        for name, (numerators, denominators) in {
+            "solar_self_consumption_community_market_import_share_ratio": demand,
+            "solar_self_consumption_community_market_local_share_of_demand_ratio": demand,
+            "solar_self_consumption_community_market_local_share_of_export_ratio": export,
+        }.items():
+            _pooled_check(kpis, name, numerators, denominators, 3.0)
+    finally:
+        env.close()
+
+
 def test_export_final_kpis_writes_child_subfolders_and_global_csv(tmp_path: Path):
     env = MultiCommunityEnv(
         communities=[

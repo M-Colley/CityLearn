@@ -196,7 +196,9 @@ single-precision runtime histories.
 - `district_demand_response_events_count`
 - `district_demand_response_active_time_step_count`
 - `district_demand_response_requested_total_kwh`
+- `district_demand_response_valid_requested_total_kwh`
 - `district_demand_response_delivered_total_kwh`
+- `district_demand_response_credited_total_kwh`
 - `district_demand_response_shortfall_total_kwh`
 - `district_demand_response_compliance_ratio`
 - `district_demand_response_revenue_total_eur`

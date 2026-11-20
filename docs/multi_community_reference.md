@@ -171,14 +171,17 @@ equal the ratio of the pooled numerator and denominator and ignore `weight`:
 | Deferrable-appliance average start delay (control and BAU) | Completed cycles |
 | Escalator service level | Requested passengers |
 | Solar self-consumption (control and BAU) | Solar generation |
+| Demand-response compliance | `demand_response_valid_requested_total_kwh` (the numerator is `demand_response_credited_total_kwh`) |
+| Community-market local share of demand and import share | Local import plus grid import after local sharing |
+| Community-market local share of export | Local export plus grid export after local sharing |
 
 The BAU deltas and ratios of the pooled deferrable service level, start delay
 and self-consumption are taken between the pooled control and BAU values.
 Communities whose value is undefined carry no weight.
 
 Ratios without additive totals stay weighted means: grid-shape ratios (peaks,
-ramping and load-factor penalties), comfort and resilience proportions, shares,
-equity, audit and coverage ratios, demand-response compliance, battery capacity
+ramping and load-factor penalties), comfort and resilience proportions,
+equity, audit and coverage ratios, battery capacity
 fade, and the `ratio_to_business_as_usual` ratios of battery capacity fade and
 equivalent full cycles.
 

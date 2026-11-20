@@ -180,6 +180,8 @@ Disponiveis quando `demand_response.enabled=true`.
 | `demand_response_delivered_total_kwh` | building/district | kWh | Delivery assinado, positivo quando o controlo segue a direcao pedida. |
 | `demand_response_shortfall_total_kwh` | building/district | kWh | Energia pedida nao entregue depois da tolerancia. |
 | `demand_response_compliance_ratio` | building/district | ratio | Delivery creditado dividido pela energia pedida valida. |
+| `demand_response_credited_total_kwh` | building/district | kWh | Delivery creditado ate ao alvo. Numerador do ratio de conformidade. |
+| `demand_response_valid_requested_total_kwh` | building/district | kWh | Energia pedida nos passos com baseline valido. Denominador do ratio de conformidade. |
 | `demand_response_revenue_total_eur` | building/district | eur | Receita por delivery creditado. |
 | `demand_response_penalty_total_eur` | building/district | eur | Penalizacao por shortfall. |
 | `demand_response_net_revenue_total_eur` | building/district | eur | Receita menos penalizacao. |

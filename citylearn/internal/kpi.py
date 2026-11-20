@@ -2053,6 +2053,15 @@ class CityLearnKPIService:
         components[v2(level, 'escalator', 'service', 'service_level', None, 'ratio')] = (
             v2(level, 'escalator', 'service', 'requested_passengers_total', None, 'count'),
         )
+        components[f'{level}_demand_response_compliance_ratio'] = (f'{level}_demand_response_valid_requested_total_kwh',)
+        # Both shares have the member demand (or export) as denominator: local plus grid-covered energy.
+        demand = (v2(level, 'energy_grid', 'community_market', 'local_import', 'total', 'kwh'),
+                  v2(level, 'energy_grid', 'community_market', 'grid_import_after_local', 'total', 'kwh'))
+        export = (v2(level, 'energy_grid', 'community_market', 'local_export', 'total', 'kwh'),
+                  v2(level, 'energy_grid', 'community_market', 'grid_export_after_local', 'total', 'kwh'))
+        components[v2(level, 'solar_self_consumption', 'community_market', 'import_share', None, 'ratio')] = demand
+        components[v2(level, 'solar_self_consumption', 'community_market', 'local_share_of_demand', None, 'ratio')] = demand
+        components[v2(level, 'solar_self_consumption', 'community_market', 'local_share_of_export', None, 'ratio')] = export
         return components
 
     @classmethod
@@ -2812,7 +2821,9 @@ class CityLearnKPIService:
                 ('events_count', 'demand_response_events_count'),
                 ('active_time_step_count', 'demand_response_active_time_step_count'),
                 ('requested_total_kwh', 'demand_response_requested_total_kwh'),
+                ('valid_requested_total_kwh', 'demand_response_valid_requested_total_kwh'),
                 ('delivered_total_kwh', 'demand_response_delivered_total_kwh'),
+                ('credited_total_kwh', 'demand_response_credited_total_kwh'),
                 ('shortfall_total_kwh', 'demand_response_shortfall_total_kwh'),
                 ('compliance_ratio', 'demand_response_compliance_ratio'),
                 ('revenue_total_eur', 'demand_response_revenue_total_eur'),

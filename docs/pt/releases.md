@@ -111,6 +111,7 @@ lista cada linha alterada e o nome que guarda o seu valor da 3.6.0.
   autoconsumo do portfolio a partir dos seus denominadores aditivos, em vez de
   os ponderar por comunidade.
   ([#244](https://github.com/citylearn-project/CityLearn/issues/244))
+- **Conformidade de demand response e quotas do mercado comunitário no portfolio.** `portfolio_demand_response_compliance_ratio` e as quotas locais de procura e de exportação (e a quota de importação) do mercado comunitário eram médias ponderadas pelo `weight` da comunidade. Passam a ser a energia creditada sobre a energia pedida válida, e a energia local sobre a energia local mais a coberta pela rede, somadas entre comunidades. As tabelas district ganham `*_demand_response_credited_total_kwh` e `*_demand_response_valid_requested_total_kwh`; nenhum valor existente muda. Só mudam as linhas do portfolio multi-comunidade, e nenhum dataset incluído é multi-comunidade. ([#285](https://github.com/citylearn-project/CityLearn/issues/285))
 - **Média de ramping do BAU.**
   `district_energy_grid_shape_quality_ramping_average_business_as_usual_kw` era
   a soma das rampas ascendentes no episódio. Passa a ser a média por transição

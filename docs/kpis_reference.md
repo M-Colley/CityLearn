@@ -226,7 +226,9 @@ Available when `demand_response.enabled=true`.
 | `demand_response_events_count` | building/district | count | Unique DR events with active settlement rows. |
 | `demand_response_active_time_step_count` | building/district | count | Number of active DR timesteps. |
 | `demand_response_requested_total_kwh` | building/district | kWh | Requested energy from `target_power_kw` over active steps. |
+| `demand_response_valid_requested_total_kwh` | building/district | kWh | Requested energy over the steps with a valid baseline. Denominator of the compliance ratio. |
 | `demand_response_delivered_total_kwh` | building/district | kWh | Signed delivery, positive when the controller moves in the requested direction. |
+| `demand_response_credited_total_kwh` | building/district | kWh | Delivery credited up to the target. Numerator of the compliance ratio. |
 | `demand_response_shortfall_total_kwh` | building/district | kWh | Non-delivered requested energy after tolerance. |
 | `demand_response_compliance_ratio` | building/district | ratio | Credited delivery divided by valid requested energy. |
 | `demand_response_revenue_total_eur` | building/district | eur | Credited delivery revenue. |
@@ -310,6 +312,7 @@ published comparisons, it is kept under a distinct name, and the legacy
 | `*_deferrable_appliance_ratio_to_business_as_usual_*_ratio` with both totals zero | Undefined (was 1). | none |
 | `building_demand_response_{shortfall_total_kwh,compliance_ratio}` | Allocated from the district settlement. | `building_demand_response_uncapped_contribution_total_kwh` (diagnostic) |
 | Portfolio EV departure rates and means, deferrable and escalator service levels, start delay and solar self-consumption (`MultiCommunityEnv`) | Pooled from their additive denominators. | none |
+| Portfolio demand-response compliance and community-market local shares of demand and export (`MultiCommunityEnv`) | Pooled from their additive components. The district rows `district_demand_response_{credited,valid_requested}_total_kwh` are new. | none |
 
 In the legacy rows, a load-factor window whose signed peak is not positive is
 now undefined; it used to give an infinite or negative penalty, which safe
