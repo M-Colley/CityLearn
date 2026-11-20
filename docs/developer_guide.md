@@ -177,8 +177,8 @@ reference per physics version, and both checks run under each version:
 
 | Version | Parity reference | NumPy reference |
 |---|---|---|
-| 1 (physics of 3.6.0) | `scripts/audit/snapshots/refactor_parity.json` | `tests/data/numpy_version_reference.json` |
-| 2 (default) | `scripts/audit/snapshots/refactor_parity_physics2.json` | `tests/data/numpy_version_reference_physics2.json` |
+| 1 (physics of 3.6.0, random streams `v1` in the NumPy test) | `scripts/audit/snapshots/refactor_parity.json` | `tests/data/numpy_version_reference.json` |
+| 2 (default physics, random streams `v2`) | `scripts/audit/snapshots/refactor_parity_physics2.json` | `tests/data/numpy_version_reference_physics2.json` |
 
 Version 1 references guard the 3.6.0 behaviour bit for bit and are never
 re-recorded. Re-record a version 2 reference only after a reviewed change of
@@ -190,6 +190,13 @@ results, and state the change in the pull request.
 - NumPy: record with NumPy 1.x only, `python tests/test_numpy_version_independence.py --write`
   (rewrites both files with LF line endings; the version 1 file must come out
   byte-identical). CI runs the test under NumPy 1.x and 2.x against the same files.
+
+The version 2 references are the default configuration: both the parity audit and the
+NumPy test run it with `physics_version=2` and the default `random_stream_version`
+(`v2`). The parity audit never passes `random_stream_version`, so it uses `v2` under
+both physics versions; only the NumPy test pins `v1` for the version 1 reference,
+which it records with the random streams of 3.6.0. `--write` records each file with its
+own configuration.
 
 The parity input fingerprint hashes the parsed schema and CSV contents, not file
 bytes, so it does not depend on line endings.

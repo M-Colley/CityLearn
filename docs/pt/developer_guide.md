@@ -155,8 +155,8 @@ versão:
 
 | Versão | Referência de paridade | Referência NumPy |
 |---|---|---|
-| 1 (física da 3.6.0) | `scripts/audit/snapshots/refactor_parity.json` | `tests/data/numpy_version_reference.json` |
-| 2 (por omissão) | `scripts/audit/snapshots/refactor_parity_physics2.json` | `tests/data/numpy_version_reference_physics2.json` |
+| 1 (física da 3.6.0, fluxos aleatórios `v1` no teste NumPy) | `scripts/audit/snapshots/refactor_parity.json` | `tests/data/numpy_version_reference.json` |
+| 2 (física por omissão, fluxos aleatórios `v2`) | `scripts/audit/snapshots/refactor_parity_physics2.json` | `tests/data/numpy_version_reference_physics2.json` |
 
 As referências da versão 1 protegem o comportamento da 3.6.0 bit a bit e nunca são
 registadas de novo. Só se regista de novo uma referência da versão 2 após uma
@@ -170,6 +170,13 @@ alteração de resultados revista, que deve constar do pull request.
   (reescreve os dois ficheiros com fins de linha LF; o da versão 1 deve ficar
   byte a byte idêntico). O CI corre o teste com NumPy 1.x e 2.x contra os mesmos
   ficheiros.
+
+As referências da versão 2 são a configuração por omissão: a auditoria de paridade e
+o teste NumPy correm-na com `physics_version=2` e o `random_stream_version` por
+omissão (`v2`). A auditoria de paridade nunca passa `random_stream_version`, pelo que
+usa `v2` com as duas versões da física; só o teste NumPy fixa `v1` na referência da
+versão 1, registada com os fluxos aleatórios da 3.6.0. `--write` regista cada ficheiro
+com a sua própria configuração.
 
 A impressão digital das entradas da paridade usa o schema e os CSV já lidos, não os
 bytes dos ficheiros, pelo que não depende dos fins de linha.

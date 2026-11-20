@@ -3,10 +3,12 @@
 NumPy 2 (NEP 50) evaluates ``float32_scalar <op> python_number`` in float32 where NumPy 1 used
 float64, and compares such operands in float32. Unhandled, that shifts every result by float32
 rounding from the first step on. The references were recorded with NumPy 1.x; CI runs this test under
-NumPy 1.x and 2.x. There is one reference per physics version: version 1 (the physics of CityLearn
-3.6.0, ``numpy_version_reference.json``) and version 2 (``numpy_version_reference_physics2.json``).
+NumPy 1.x and 2.x. There is one reference per configuration: physics version 1 with random streams 'v1' (CityLearn
+3.6.0, ``numpy_version_reference.json``) and physics version 2 with random streams 'v2', the defaults
+(``numpy_version_reference_physics2.json``).
 
-Regenerate (NumPy 1.x only, after a reviewed change of results, both files at once):
+Regenerate (NumPy 1.x only, after a reviewed change of results, both files at once, each with its own
+configuration):
 ``python tests/test_numpy_version_independence.py --write``.
 """
 
@@ -22,7 +24,11 @@ from citylearn.citylearn import CityLearnEnv
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(__file__).resolve().parent/'data'
-REFERENCES = {1: DATA/'numpy_version_reference.json', 2: DATA/'numpy_version_reference_physics2.json'}
+# id -> (physics_version, random_stream_version, reference file). The second entry is the default configuration.
+CONFIGS = {
+    'physics1-streams-v1': (1, 'v1', DATA/'numpy_version_reference.json'),
+    'physics2-streams-v2': (2, 'v2', DATA/'numpy_version_reference_physics2.json'),
+}
 STEPS = 48
 # Far above cross-platform rounding noise, far below the float32 drift NumPy 2 introduced.
 RTOL = 1.0e-9
@@ -41,13 +47,13 @@ def _action(t: int, j: int, low: float, high: float) -> float:
     return min(max(value, float(low)), float(high))
 
 
-def _rollout(name: str, physics_version: int) -> dict:
-    # The version 1 reference was recorded with the physics and random streams of CityLearn 3.6.0, which physics
+def _rollout(name: str, physics_version: int, random_stream_version: str) -> dict:
+    # The first reference was recorded with the physics and random streams of CityLearn 3.6.0, which physics
     # version 1 and random_stream_version 'v1' keep. The 'v2' streams use SeedSequence and PCG64, whose output
     # NumPy keeps identical across versions.
     env = CityLearnEnv(str(ROOT/'data'/'datasets'/name/'schema.json'), central_agent=True,
                        episode_time_steps=STEPS + 1, random_seed=0, physics_version=physics_version,
-                       random_stream_version='v1')
+                       random_stream_version=random_stream_version)
     env.reset(seed=0)
     rewards = []
     t = 0
@@ -79,11 +85,12 @@ def _rollout(name: str, physics_version: int) -> dict:
     }
 
 
-@pytest.mark.parametrize('physics_version', sorted(REFERENCES))
+@pytest.mark.parametrize('config', CONFIGS)
 @pytest.mark.parametrize('name', DATASETS)
-def test_rollout_matches_numpy1_reference(name, physics_version):
-    expected = json.loads(REFERENCES[physics_version].read_text(encoding='utf-8'))[name]
-    actual = _rollout(name, physics_version)
+def test_rollout_matches_numpy1_reference(name, config):
+    physics_version, streams, reference = CONFIGS[config]
+    expected = json.loads(reference.read_text(encoding='utf-8'))[name]
+    actual = _rollout(name, physics_version, streams)
 
     np.testing.assert_allclose(np.asarray(actual['rewards']), np.asarray(expected['rewards']), rtol=RTOL, atol=0.0)
     np.testing.assert_allclose(actual['district_net_electricity_consumption'],
@@ -102,8 +109,8 @@ def test_rollout_matches_numpy1_reference(name, physics_version):
 if __name__ == '__main__' and '--write' in sys.argv:
     if int(np.__version__.split('.')[0]) != 1:
         raise SystemExit('The reference must be recorded with NumPy 1.x.')
-    for version, path in REFERENCES.items():
+    for version, streams, path in CONFIGS.values():
         # newline='\n': tests/data is never converted, so a Windows run must not write CRLF into the reference.
         with path.open('w', encoding='utf-8', newline='\n') as handle:
-            handle.write(json.dumps({name: _rollout(name, version) for name in DATASETS}, indent=1) + '\n')
+            handle.write(json.dumps({name: _rollout(name, version, streams) for name in DATASETS}, indent=1) + '\n')
         print(f'wrote {path}')
