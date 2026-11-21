@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import time
 import warnings
-from typing import TYPE_CHECKING, Any, List, Mapping, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import math
 
@@ -259,7 +259,18 @@ class CityLearnRuntimeService:
             timings['entity_action_execution_time'] = time.perf_counter() - timer_start
 
         timer_start = time.perf_counter() if debug_timing else 0.0
-        self.update_variables()
+        env._district_feeder_curtailed_this_step = False
+        env._executing_step = True
+        try:
+            self.update_variables()
+        finally:
+            env._executing_step = False
+        if capture_entity_execution and getattr(env, '_district_feeder_curtailed_this_step', False):
+            action_execution = self._entity_action_execution(
+                requested_records=requested_action_records or {},
+                post_channel_records=post_channel_action_records or {},
+                time_step=int(env.time_step),
+            )
         self._record_deferrable_service_interval()
         env._provenance_service.settle()
         if debug_timing:
@@ -1356,6 +1367,9 @@ class CityLearnRuntimeService:
                 float(np.max(building_update_times)) if building_update_times else 0.0
             )
 
+        if getattr(env, '_executing_step', False) and getattr(env, 'district_electrical_service_enabled', False):
+            env._district_feeder_curtailed_this_step = self._apply_district_electrical_service()
+
         timer_start = time.perf_counter() if debug_timing else 0.0
         if getattr(env, 'community_market_enabled', False):
             self._apply_community_market_settlement()
@@ -1386,6 +1400,469 @@ class CityLearnRuntimeService:
         if debug_timing:
             timings['district_aggregate_update_time'] = time.perf_counter() - timer_start
             env._last_update_variables_debug_timing = timings
+
+    def _apply_district_electrical_service(self) -> bool:
+        """Enforce opt-in district feeder import/export operating envelopes."""
+        import math
+        from citylearn.internal import grid_availability
+        from citylearn.internal.electrical_limits import (
+            allocate_district_feeder_envelope,
+            district_feeder_violation_kw,
+            electrical_service_violation_kw,
+            resolve_district_feeder_limits_at,
+        )
+        from citylearn.internal.scalars import clip_scalar
+        from citylearn.internal.units import (
+            energy_kwh_to_power_kw,
+            to_dataset_resolution_energy,
+        )
+
+        env = self.env
+        t = int(env.time_step)
+        parsed_cfg = getattr(env, '_district_electrical_service_parsed', None)
+        if not parsed_cfg or not parsed_cfg.get('enabled', False):
+            return False
+
+        step_seconds = max(float(getattr(env, 'seconds_per_time_step', 3600.0) or 3600.0), 1.0e-9)
+        tracker = getattr(env, 'episode_tracker', None)
+        ep_start = int(getattr(tracker, 'episode_start_time_step', 0) or 0)
+
+        import_limit_kw, export_limit_kw = resolve_district_feeder_limits_at(
+            parsed_cfg,
+            t,
+            episode_start_time_step=ep_start,
+        )
+
+        before_energy_kwh = sum(float(b.net_electricity_consumption[t]) for b in env.buildings)
+        before_power_kw = energy_kwh_to_power_kw(before_energy_kwh, step_seconds)
+
+        controls_power_kw: Dict[str, float] = {}
+        controls_min_power_kw: Dict[str, float] = {}
+        controls_floor_power_kw: Dict[str, float] = {}
+        control_targets: Dict[str, tuple] = {}
+        building_service_specs: Dict[int, dict] = {}
+
+        for b_idx, building in enumerate(env.buildings):
+            if bool(getattr(building, 'power_outage', False)):
+                continue
+
+            b_cids = []
+            b_connections: Dict[str, object] = {}
+
+            storage = getattr(building, 'electrical_storage', None)
+            if storage is not None and float(getattr(storage, 'capacity', 0.0) or 0.0) > 0.0:
+                s_energy_kwh = float(storage.electricity_consumption_at(t))
+                s_power_kw = energy_kwh_to_power_kw(s_energy_kwh, step_seconds)
+                if abs(s_power_kw) > 1.0e-9:
+                    cid = f'b{b_idx}:storage'
+                    controls_power_kw[cid] = s_power_kw
+                    controls_min_power_kw[cid] = 0.0
+                    controls_floor_power_kw[cid] = 0.0
+                    control_targets[cid] = ('storage', building, storage, s_energy_kwh, s_power_kw, 0.0)
+                    b_cids.append(cid)
+                    b_connections[cid] = getattr(building, 'electrical_storage_phase_connection', None)
+
+            for c_idx, charger in enumerate(building.electric_vehicle_chargers or []):
+                if charger.connected_electric_vehicle is None:
+                    continue
+                c_energy_kwh = float(charger.electricity_consumption[t])
+                c_power_kw = energy_kwh_to_power_kw(c_energy_kwh, step_seconds)
+                if abs(c_power_kw) > 1.0e-9:
+                    cid = f'b{b_idx}:charger:{c_idx}'
+                    if c_power_kw > 0.0:
+                        max_p = max(float(getattr(charger, 'max_charging_power', 0.0) or 0.0), 0.0)
+                        min_p = max(min(float(getattr(charger, 'min_charging_power', 0.0) or 0.0), max_p), 0.0)
+                    else:
+                        max_p = max(float(getattr(charger, 'max_discharging_power', 0.0) or 0.0), 0.0)
+                        min_p = max(min(float(getattr(charger, 'min_discharging_power', 0.0) or 0.0), max_p), 0.0)
+                    effective_min_p = min(min_p, abs(c_power_kw))
+                    controls_power_kw[cid] = c_power_kw
+                    controls_min_power_kw[cid] = effective_min_p
+                    controls_floor_power_kw[cid] = 0.0
+                    control_targets[cid] = ('charger', building, charger, c_energy_kwh, c_power_kw, effective_min_p)
+                    b_cids.append(cid)
+                    b_connections[cid] = (getattr(building, '_charger_phase_map', None) or {}).get(charger.charger_id)
+
+            if (
+                b_cids
+                and bool(getattr(building, '_charging_constraints_enabled', False))
+                and bool(getattr(building, '_electrical_service_enabled', False))
+            ):
+                ops = building._ops_service
+                phase_names = list(ops._current_phase_names())
+                total_limits = grid_availability.total_limits_at(
+                    building, building._electrical_service_limits.get('total', {}), t
+                )
+                per_phase_limits = building._electrical_service_limits.get('per_phase', {})
+                b_tot_0 = energy_kwh_to_power_kw(float(building.net_electricity_consumption[t]), step_seconds)
+                assigned_0 = sum(controls_power_kw[cid] for cid in b_cids)
+                unassigned_tot = b_tot_0 - assigned_0
+                unassigned_ph = {
+                    ph: float(val) for ph, val in ops._split_unassigned_power(unassigned_tot).items()
+                }
+                shares_by_cid: Dict[str, Dict[str, float]] = {}
+                b_ph_0 = {ph: unassigned_ph.get(ph, 0.0) for ph in phase_names}
+                for cid in b_cids:
+                    sh = {
+                        ph: float(val)
+                        for ph, val in ops._split_power_by_connection(1.0, b_connections[cid]).items()
+                    }
+                    shares_by_cid[cid] = sh
+                    for ph in phase_names:
+                        b_ph_0[ph] = b_ph_0.get(ph, 0.0) + sh.get(ph, 0.0) * controls_power_kw[cid]
+
+                pre_viol_kw = electrical_service_violation_kw(
+                    b_tot_0, b_ph_0, total_limits, per_phase_limits, phase_names
+                )
+                safety_kw = 1.0e-5
+                b_exp = total_limits.get('export_kw')
+                b_imp = total_limits.get('import_kw')
+                lb_tot = (
+                    min(-float(b_exp) + safety_kw, b_tot_0)
+                    if b_exp is not None and math.isfinite(float(b_exp))
+                    else float('-inf')
+                )
+                ub_tot = (
+                    max(float(b_imp) - safety_kw, b_tot_0)
+                    if b_imp is not None and math.isfinite(float(b_imp))
+                    else float('inf')
+                )
+                lb_ph: Dict[str, float] = {}
+                ub_ph: Dict[str, float] = {}
+                for ph in phase_names:
+                    ph_lim = per_phase_limits.get(ph, {}) or {}
+                    pe = ph_lim.get('export_kw')
+                    pi = ph_lim.get('import_kw')
+                    lb_ph[ph] = (
+                        min(-float(pe) + safety_kw, b_ph_0[ph])
+                        if pe is not None and math.isfinite(float(pe))
+                        else float('-inf')
+                    )
+                    ub_ph[ph] = (
+                        max(float(pi) - safety_kw, b_ph_0[ph])
+                        if pi is not None and math.isfinite(float(pi))
+                        else float('inf')
+                    )
+
+                for cid in b_cids:
+                    p_i = controls_power_kw[cid]
+                    sh_i = shares_by_cid[cid]
+                    # Best-case help from other controls on this building when curtailing cid toward 0.
+                    other_pos_tot = sum(controls_power_kw[c] for c in b_cids if c != cid and controls_power_kw[c] > 0.0)
+                    other_neg_tot = sum(controls_power_kw[c] for c in b_cids if c != cid and controls_power_kw[c] < 0.0)
+                    req_mag = 0.0
+                    if p_i > 0.0:
+                        if math.isfinite(lb_tot):
+                            req_mag = max(req_mag, lb_tot - (unassigned_tot + other_pos_tot))
+                        for ph in phase_names:
+                            alpha_ph = sh_i.get(ph, 0.0)
+                            if alpha_ph > 1.0e-9 and math.isfinite(lb_ph[ph]):
+                                other_pos_ph = sum(
+                                    shares_by_cid[c].get(ph, 0.0) * controls_power_kw[c]
+                                    for c in b_cids if c != cid and controls_power_kw[c] > 0.0
+                                )
+                                req_mag = max(req_mag, (lb_ph[ph] - (unassigned_ph.get(ph, 0.0) + other_pos_ph)) / alpha_ph)
+                    else:
+                        if math.isfinite(ub_tot):
+                            req_mag = max(req_mag, (unassigned_tot + other_neg_tot) - ub_tot)
+                        for ph in phase_names:
+                            alpha_ph = sh_i.get(ph, 0.0)
+                            if alpha_ph > 1.0e-9 and math.isfinite(ub_ph[ph]):
+                                other_neg_ph = sum(
+                                    shares_by_cid[c].get(ph, 0.0) * controls_power_kw[c]
+                                    for c in b_cids if c != cid and controls_power_kw[c] < 0.0
+                                )
+                                req_mag = max(req_mag, ((unassigned_ph.get(ph, 0.0) + other_neg_ph) - ub_ph[ph]) / alpha_ph)
+                    controls_floor_power_kw[cid] = min(abs(p_i), max(0.0, req_mag))
+
+                building_service_specs[id(building)] = {
+                    'building': building,
+                    'cids': b_cids,
+                    'phase_names': phase_names,
+                    'unassigned_tot': unassigned_tot,
+                    'unassigned_ph': unassigned_ph,
+                    'shares': shares_by_cid,
+                    'total_limits': total_limits,
+                    'per_phase_limits': per_phase_limits,
+                    'lb_tot': lb_tot,
+                    'ub_tot': ub_tot,
+                    'lb_ph': lb_ph,
+                    'ub_ph': ub_ph,
+                    'pre_viol_kw': pre_viol_kw,
+                }
+
+        def _project_building_scales(scales_map: Dict[str, float]) -> tuple:
+            """Ensure multi-device buildings never violate their own total or per-phase bounds."""
+            updated = dict(scales_map)
+            clamped_cids = set()
+            for spec in building_service_specs.values():
+                b_cids = spec['cids']
+                if len(b_cids) < 2:
+                    continue
+                un_tot = spec['unassigned_tot']
+                cur_c = sum(controls_power_kw[c] * updated[c] for c in b_cids)
+                full_c = sum(controls_power_kw[c] for c in b_cids)
+                cur_tot = un_tot + cur_c
+                full_tot = un_tot + full_c
+                theta = 0.0
+                if math.isfinite(spec['lb_tot']) and cur_tot < spec['lb_tot'] - 1.0e-9 and full_tot > cur_tot + 1.0e-12:
+                    theta = max(theta, (spec['lb_tot'] - cur_tot) / (full_tot - cur_tot))
+                if math.isfinite(spec['ub_tot']) and cur_tot > spec['ub_tot'] + 1.0e-9 and cur_tot > full_tot + 1.0e-12:
+                    theta = max(theta, (cur_tot - spec['ub_tot']) / (cur_tot - full_tot))
+                for ph in spec['phase_names']:
+                    un_ph = spec['unassigned_ph'].get(ph, 0.0)
+                    cur_ph = un_ph + sum(spec['shares'][c].get(ph, 0.0) * controls_power_kw[c] * updated[c] for c in b_cids)
+                    full_ph = un_ph + sum(spec['shares'][c].get(ph, 0.0) * controls_power_kw[c] for c in b_cids)
+                    if math.isfinite(spec['lb_ph'][ph]) and cur_ph < spec['lb_ph'][ph] - 1.0e-9 and full_ph > cur_ph + 1.0e-12:
+                        theta = max(theta, (spec['lb_ph'][ph] - cur_ph) / (full_ph - cur_ph))
+                    if math.isfinite(spec['ub_ph'][ph]) and cur_ph > spec['ub_ph'][ph] + 1.0e-9 and cur_ph > full_ph + 1.0e-12:
+                        theta = max(theta, (cur_ph - spec['ub_ph'][ph]) / (cur_ph - full_ph))
+                if theta > 1.0e-9:
+                    theta = min(1.0, max(0.0, theta))
+                    for c in b_cids:
+                        ns = updated[c] + theta * (1.0 - updated[c])
+                        min_req = controls_min_power_kw[c] / max(abs(controls_power_kw[c]), 1.0e-12)
+                        if 0.0 < ns < min_req:
+                            ns = min_req
+                        updated[c] = clip_scalar(ns, 0.0, 1.0)
+                        clamped_cids.add(c)
+            return updated, clamped_cids
+
+        allocation = allocate_district_feeder_envelope(
+            before_power_kw,
+            controls_power_kw,
+            import_limit_kw,
+            export_limit_kw,
+            controls_min_power_kw=controls_min_power_kw,
+            controls_floor_power_kw=controls_floor_power_kw,
+            tolerance_kw=1.0e-6,
+        )
+        applied_scales = dict(allocation.scales)
+
+        if allocation.curtailed and building_service_specs:
+            projected_scales, clamped_cids = _project_building_scales(applied_scales)
+            if clamped_cids:
+                applied_scales = projected_scales
+                for c in clamped_cids:
+                    controls_floor_power_kw[c] = max(
+                        controls_floor_power_kw[c],
+                        abs(controls_power_kw[c]) * applied_scales[c],
+                    )
+                free_controls = {c: p for c, p in controls_power_kw.items() if c not in clamped_cids}
+                if free_controls:
+                    clamped_shift = sum(
+                        controls_power_kw[c] * (applied_scales[c] - 1.0) for c in clamped_cids
+                    )
+                    re_alloc = allocate_district_feeder_envelope(
+                        before_power_kw + clamped_shift,
+                        free_controls,
+                        import_limit_kw,
+                        export_limit_kw,
+                        controls_min_power_kw={c: controls_min_power_kw[c] for c in free_controls},
+                        controls_floor_power_kw={c: controls_floor_power_kw[c] for c in free_controls},
+                        tolerance_kw=1.0e-6,
+                    )
+                    for c, s in re_alloc.scales.items():
+                        applied_scales[c] = s
+
+        affected_buildings = []
+        affected_seen = set()
+        rewound_cids = set()
+
+        def _mark_building(building) -> None:
+            if id(building) not in affected_seen:
+                affected_seen.add(id(building))
+                affected_buildings.append(building)
+
+        def _replay_device(cid: str, scale: float) -> bool:
+            kind, building, device, orig_energy_kwh, orig_power_kw, _ = control_targets[cid]
+            scale = clip_scalar(float(scale), 0.0, 1.0)
+            if scale >= 1.0 - 1.0e-9 and cid not in rewound_cids:
+                return False
+            if kind == 'storage':
+                if not device._rewind_step_charge(t):
+                    return False
+                rewound_cids.add(cid)
+                target_energy_kwh = orig_energy_kwh * scale
+                ratio = getattr(device, 'time_step_ratio', None)
+                device.charge(to_dataset_resolution_energy(target_energy_kwh, ratio))
+                _mark_building(building)
+                return True
+            if kind == 'charger':
+                if not device._rewind_step_charge(t):
+                    return False
+                rewound_cids.add(cid)
+                target_power_kw = orig_power_kw * scale
+                if abs(target_power_kw) <= 1.0e-9:
+                    action_val = 0.0
+                elif orig_power_kw > 0.0:
+                    max_p = max(float(getattr(device, 'max_charging_power', 0.0) or 0.0), 0.0)
+                    min_p = max(min(float(getattr(device, 'min_charging_power', 0.0) or 0.0), max_p), 0.0)
+                    if max_p <= 0.0 or (min_p > 0.0 and target_power_kw + 1.0e-6 < min_p):
+                        action_val = 0.0
+                    else:
+                        action_val = clip_scalar(max(target_power_kw, min_p) / max_p, 0.0, 1.0)
+                else:
+                    max_p = max(float(getattr(device, 'max_discharging_power', 0.0) or 0.0), 0.0)
+                    min_p = max(min(float(getattr(device, 'min_discharging_power', 0.0) or 0.0), max_p), 0.0)
+                    req_mag = abs(target_power_kw)
+                    if max_p <= 0.0 or (min_p > 0.0 and req_mag + 1.0e-6 < min_p):
+                        action_val = 0.0
+                    else:
+                        action_val = -clip_scalar(max(req_mag, min_p) / max_p, 0.0, 1.0)
+                device.update_connected_electric_vehicle_soc(action_val)
+                _mark_building(building)
+                return True
+            return False
+
+        def _settled_device_energy_kwh(cid: str) -> float:
+            kind, _, device, _, _, _ = control_targets[cid]
+            if kind == 'storage':
+                return float(device.electricity_consumption_at(t))
+            return float(device.electricity_consumption[t])
+
+        if any(scale < 1.0 - 1.0e-9 for scale in applied_scales.values()):
+            for cid, scale in applied_scales.items():
+                if scale < 1.0 - 1.0e-9:
+                    _replay_device(cid, scale)
+            for building in affected_buildings:
+                building._refresh_step_electrical_totals()
+
+        # Verify settled building electrical-service constraints did not regress due to nonlinearities.
+        if affected_buildings and building_service_specs:
+            restored_any_building = False
+            for building in list(affected_buildings):
+                spec = building_service_specs.get(id(building))
+                if spec is None:
+                    continue
+                ops = building._ops_service
+                settled_tot = energy_kwh_to_power_kw(float(building.net_electricity_consumption[t]), step_seconds)
+                settled_ph = {ph: spec['unassigned_ph'].get(ph, 0.0) for ph in spec['phase_names']}
+                for cid in spec['cids']:
+                    c_kw = energy_kwh_to_power_kw(_settled_device_energy_kwh(cid), step_seconds)
+                    for ph in spec['phase_names']:
+                        settled_ph[ph] = settled_ph.get(ph, 0.0) + spec['shares'][cid].get(ph, 0.0) * c_kw
+                settled_b_viol = electrical_service_violation_kw(
+                    settled_tot, settled_ph, spec['total_limits'], spec['per_phase_limits'], spec['phase_names']
+                )
+                if settled_b_viol > spec['pre_viol_kw'] + 1.0e-6:
+                    for cid in spec['cids']:
+                        if applied_scales[cid] < 1.0 - 1.0e-9:
+                            applied_scales[cid] = 1.0
+                            controls_floor_power_kw[cid] = abs(controls_power_kw[cid])
+                            restored_any_building |= _replay_device(cid, 1.0)
+            if restored_any_building:
+                for building in affected_buildings:
+                    building._refresh_step_electrical_totals()
+
+        # Post-deadband verification against settled device actions for both limits.
+        for _ in range(2):
+            after_energy_kwh = sum(float(b.net_electricity_consumption[t]) for b in env.buildings)
+            after_power_kw = energy_kwh_to_power_kw(after_energy_kwh, step_seconds)
+            if district_feeder_violation_kw(after_power_kw, import_limit_kw, export_limit_kw) <= 1.0e-5:
+                break
+
+            settled_controls = {
+                cid: energy_kwh_to_power_kw(_settled_device_energy_kwh(cid), step_seconds)
+                for cid in control_targets
+            }
+            adjusted_this_pass = False
+            if (
+                import_limit_kw is not None
+                and math.isfinite(import_limit_kw)
+                and after_power_kw > import_limit_kw + 1.0e-5
+            ):
+                active_settled = {c: p for c, p in settled_controls.items() if abs(p) > 1.0e-9}
+                if active_settled:
+                    re_alloc = allocate_district_feeder_envelope(
+                        after_power_kw,
+                        active_settled,
+                        import_limit_kw,
+                        export_limit_kw,
+                        controls_min_power_kw={c: min(controls_min_power_kw[c], abs(p)) for c, p in active_settled.items()},
+                        controls_floor_power_kw={c: min(controls_floor_power_kw[c], abs(p)) for c, p in active_settled.items()},
+                        tolerance_kw=1.0e-6,
+                    )
+                    if re_alloc.curtailed:
+                        for cid, factor in re_alloc.scales.items():
+                            if factor < 1.0 - 1.0e-9:
+                                new_scale = applied_scales[cid] * factor
+                                applied_scales[cid] = new_scale
+                                adjusted_this_pass |= _replay_device(cid, new_scale)
+
+            elif (
+                export_limit_kw is not None
+                and math.isfinite(export_limit_kw)
+                and -after_power_kw > export_limit_kw + 1.0e-5
+            ):
+                active_settled = {c: p for c, p in settled_controls.items() if abs(p) > 1.0e-9}
+                re_alloc = (
+                    allocate_district_feeder_envelope(
+                        after_power_kw,
+                        active_settled,
+                        import_limit_kw,
+                        export_limit_kw,
+                        controls_min_power_kw={c: min(controls_min_power_kw[c], abs(p)) for c, p in active_settled.items()},
+                        controls_floor_power_kw={c: min(controls_floor_power_kw[c], abs(p)) for c, p in active_settled.items()},
+                        tolerance_kw=1.0e-6,
+                    )
+                    if any(p < -1.0e-9 for p in active_settled.values())
+                    else None
+                )
+                if re_alloc is not None and re_alloc.curtailed:
+                    for cid, factor in re_alloc.scales.items():
+                        if factor < 1.0 - 1.0e-9:
+                            new_scale = applied_scales[cid] * factor
+                            applied_scales[cid] = new_scale
+                            adjusted_this_pass |= _replay_device(cid, new_scale)
+                else:
+                    # Export excess after pausing a charging device: restore continuous curtailed charging up to request.
+                    needed_up_kw = -after_power_kw - export_limit_kw
+                    if import_limit_kw is not None and math.isfinite(import_limit_kw):
+                        needed_up_kw = min(needed_up_kw, max(0.0, import_limit_kw - after_power_kw))
+                    expandable = [
+                        cid for cid, (_, _, _, _, orig_p, min_p) in control_targets.items()
+                        if orig_p > 1.0e-9 and min_p <= 1.0e-9 and settled_controls[cid] + 1.0e-6 < orig_p
+                    ]
+                    avail_up_kw = sum(control_targets[cid][4] - settled_controls[cid] for cid in expandable)
+                    if needed_up_kw > 1.0e-6 and avail_up_kw > 1.0e-9:
+                        frac = min(1.0, needed_up_kw / avail_up_kw)
+                        for cid in expandable:
+                            orig_p = control_targets[cid][4]
+                            target_p = settled_controls[cid] + frac * (orig_p - settled_controls[cid])
+                            new_scale = clip_scalar(target_p / orig_p, 0.0, 1.0)
+                            applied_scales[cid] = new_scale
+                            adjusted_this_pass |= _replay_device(cid, new_scale)
+
+            if not adjusted_this_pass:
+                break
+            for building in affected_buildings:
+                building._refresh_step_electrical_totals()
+
+        after_energy_kwh = sum(float(b.net_electricity_consumption[t]) for b in env.buildings)
+        after_power_kw = energy_kwh_to_power_kw(after_energy_kwh, step_seconds)
+
+        curtailed_import_kwh = 0.0
+        curtailed_export_kwh = 0.0
+        for cid, (_, _, _, orig_e, _, _) in control_targets.items():
+            settled_e = _settled_device_energy_kwh(cid)
+            if orig_e > 1.0e-12:
+                curtailed_import_kwh += max(0.0, orig_e - settled_e)
+            elif orig_e < -1.0e-12:
+                curtailed_export_kwh += max(0.0, settled_e - orig_e)
+
+        violation_kw = district_feeder_violation_kw(after_power_kw, import_limit_kw, export_limit_kw)
+
+        imp_buf = getattr(env, '_feeder_curtailed_import_kwh', None)
+        exp_buf = getattr(env, '_feeder_curtailed_export_kwh', None)
+        viol_buf = getattr(env, '_feeder_limit_violation_kw', None)
+        if imp_buf is not None and 0 <= t < len(imp_buf):
+            imp_buf[t] = float(curtailed_import_kwh)
+            exp_buf[t] = float(curtailed_export_kwh)
+            viol_buf[t] = float(violation_kw)
+            env._feeder_recorded_length = max(int(getattr(env, '_feeder_recorded_length', 0)), t + 1)
+
+        return bool(affected_buildings)
 
     @staticmethod
     def _to_scalar(value, default: float = 0.0) -> float:
