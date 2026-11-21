@@ -1677,6 +1677,8 @@ class CityLearnEnv(Environment, Env):
         baseline_condition: EvaluationCondition = None,
         comfort_band: float = None,
         include_business_as_usual: bool = True,
+        include_peak_flexibility_audit: bool = False,
+        flexibility_peak_hours: Tuple[int, int] = (16, 19),
         *,
         progress_callback=None,
     ) -> pd.DataFrame:
@@ -1701,6 +1703,14 @@ class CityLearnEnv(Environment, Env):
             The reference is rebuilt from the schema and the constructor arguments; a `ValueError` names the
             setting when it differs from this environment as captured at its last `reset()`. See the baselines
             guide for the settings that are compared.
+        include_peak_flexibility_audit: bool, default: False
+            Opt-in flag to append peak-window load reduction relative to BAU
+            (``*_peak_window_{mean,p90}_load_reduction_to_business_as_usual_kw``) and EV peak-window V2X contribution
+            (``*_ev_peak_window_net_export_kwh``, ``*_ev_peak_window_{mean,p90}_net_discharge_kw``). Defaults to
+            ``False`` so default KPI tables remain unchanged.
+        flexibility_peak_hours: Tuple[int, int], default: (16, 19)
+            Half-open 24-hour clock window ``(start_hour, end_hour)`` evaluated by the peak-window flexibility KPIs
+            when ``include_peak_flexibility_audit=True``.
         progress_callback: callable, optional
             Keyword-only. Receives scalar stage events while the table is computed. A callback that raises is
             logged and disabled; the table is unaffected, and no events or timings are added to it.
@@ -1729,6 +1739,8 @@ class CityLearnEnv(Environment, Env):
             baseline_condition=baseline_condition,
             comfort_band=comfort_band,
             include_business_as_usual=include_business_as_usual,
+            include_peak_flexibility_audit=include_peak_flexibility_audit,
+            flexibility_peak_hours=flexibility_peak_hours,
             evaluation_condition_cls=EvaluationCondition,
             dynamics_building_cls=DynamicsBuilding,
             progress_callback=progress_callback,

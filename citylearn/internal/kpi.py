@@ -2511,13 +2511,18 @@ class CityLearnKPIService:
     @settled_cost_scope
     def evaluate_v2(
         self, control_condition=None, baseline_condition=None, comfort_band=None,
-        include_business_as_usual=True, *, evaluation_condition_cls,
+        include_business_as_usual=True, *,
+        include_peak_flexibility_audit: bool = False,
+        flexibility_peak_hours: Tuple[int, int] = (16, 19),
+        evaluation_condition_cls,
         dynamics_building_cls, progress_callback=None,
     ) -> pd.DataFrame:
         progress = None if progress_callback is None else EvaluationProgress(progress_callback)
         return run(progress, 'evaluation', self._evaluate_v2,
                    control_condition=control_condition, baseline_condition=baseline_condition,
                    comfort_band=comfort_band, include_business_as_usual=include_business_as_usual,
+                   include_peak_flexibility_audit=include_peak_flexibility_audit,
+                   flexibility_peak_hours=flexibility_peak_hours,
                    evaluation_condition_cls=evaluation_condition_cls,
                    dynamics_building_cls=dynamics_building_cls, progress=progress)
 
@@ -2528,6 +2533,8 @@ class CityLearnKPIService:
         comfort_band: float = None,
         include_business_as_usual: bool = True,
         *,
+        include_peak_flexibility_audit: bool = False,
+        flexibility_peak_hours: Tuple[int, int] = (16, 19),
         evaluation_condition_cls,
         dynamics_building_cls,
         progress=None,
@@ -3062,6 +3069,26 @@ class CityLearnKPIService:
                 evaluation_condition_cls=evaluation_condition_cls,
                 dynamics_building_cls=dynamics_building_cls,
             )
+
+        if bool(include_peak_flexibility_audit):
+            from citylearn.internal import peak_flexibility_audit
+
+            bau_env_ref = None
+            if include_business_as_usual and not bool(getattr(env, '_business_as_usual_sidecar', False)):
+                bau_env_ref = env.run_business_as_usual_baseline().env
+
+            flex_rows = run(
+                progress,
+                'peak_flexibility_audit',
+                peak_flexibility_audit.compute_peak_flexibility_audit_records,
+                self,
+                kpi_buildings=kpi_buildings,
+                building_windows=building_windows,
+                bau_env=bau_env_ref,
+                flexibility_peak_hours=flexibility_peak_hours,
+            )
+            for row in flex_rows:
+                put(str(row['level']), str(row['name']), str(row['cost_function']), row['value'])
 
         output = pd.DataFrame(list(records.values()))
         if getattr(robustness_service, 'enabled', False):

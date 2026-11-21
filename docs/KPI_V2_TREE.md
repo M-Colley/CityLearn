@@ -22,6 +22,7 @@ Which rows appear depends on the scenario's assets and services.
 | [Batteries](#batteries) | 40 |
 | [Electrical service and phases](#electrical-service-and-phases) | 22 |
 | [Electric vehicles](#electric-vehicles) | 62 |
+| [Peak-window flexibility](#peak-window-flexibility) | 10 |
 | [EV departure audit](#ev-departure-audit) | 128 |
 | [Flexible appliances](#flexible-appliances) | 48 |
 | [Flexible-appliance audit](#flexible-appliance-audit) | 68 |
@@ -591,6 +592,36 @@ district_ev_total_charge_kwh
 district_ev_total_v2g_export_business_as_usual_kwh
 district_ev_total_v2g_export_delta_to_business_as_usual_kwh
 district_ev_total_v2g_export_kwh
+```
+
+</details>
+
+## Peak-window flexibility
+
+Opt-in peak-window net load reduction relative to business as usual (BAU) and EV V2X contribution over `flexibility_peak_hours`; the rows appear when `evaluate_v2(include_peak_flexibility_audit=True)` is passed.
+
+Equations and rules: [Peak-window flexibility](kpis_reference.md#peak-window-flexibility).
+
+| Names | Levels | Unit | Meaning |
+|---|---|---|---|
+| `peak_window_{mean,p90}_load_reduction_to_business_as_usual_kw` | building, district | kW | Mean and P90 firm (10th-percentile) net load reduction `BAU_net_kw − control_net_kw` during `flexibility_peak_hours`; undefined when BAU is unavailable (`include_business_as_usual=False`). |
+| `ev_peak_window_net_export_kwh` | building, district | kWh | Non-negative net AC energy exported by EV chargers into the building or district during `flexibility_peak_hours`, independent of BAU (0 without EVs). |
+| `ev_peak_window_{mean,p90}_net_discharge_kw` | building, district | kW | Mean and P90 firm (10th-percentile) net AC EV discharge power `−charger_power_kw` during `flexibility_peak_hours`, independent of BAU (0 without EVs). |
+
+<details>
+<summary>All 10 names</summary>
+
+```text
+building_ev_peak_window_mean_net_discharge_kw
+building_ev_peak_window_net_export_kwh
+building_ev_peak_window_p90_net_discharge_kw
+building_peak_window_mean_load_reduction_to_business_as_usual_kw
+building_peak_window_p90_load_reduction_to_business_as_usual_kw
+district_ev_peak_window_mean_net_discharge_kw
+district_ev_peak_window_net_export_kwh
+district_ev_peak_window_p90_net_discharge_kw
+district_peak_window_mean_load_reduction_to_business_as_usual_kw
+district_peak_window_p90_load_reduction_to_business_as_usual_kw
 ```
 
 </details>

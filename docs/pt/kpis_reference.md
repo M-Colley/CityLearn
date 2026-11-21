@@ -115,6 +115,7 @@ explicada na sua secção:
 - [Baterias](#baterias): Atividade e desgaste das baterias estacionárias; as linhas aparecem em todas as execuções, com energia nula e ciclos e perda de capacidade indefinidos para membros sem bateria.
 - [Serviço elétrico e fases](#serviço-elétrico-e-fases): Cumprimento dos limites de potência total e por fase declarados para o serviço elétrico, e o equilíbrio e os picos das fases; os valores são nulos ou indefinidos se o esquema não configurar um serviço elétrico.
 - [Veículos elétricos](#veículos-elétricos): Serviço à partida, energia de carregamento e V2G dos veículos elétricos (VE) nos carregadores dos membros. Todos os membros emitem estas linhas; sem carregadores, as contagens e energias são 0 e as taxas ficam indefinidas.
+- [Flexibilidade na janela de ponta](#flexibilidade-na-janela-de-ponta): Redução líquida da carga face à execução BAU e contributo V2X dos VE na janela de ponta `flexibility_peak_hours`; as linhas aparecem quando se passa `evaluate_v2(include_peak_flexibility_audit=True)`.
 - [Auditoria das partidas dos VE](#auditoria-das-partidas-dos-ve): Serviço auditado às partidas dos VE, com uma população explícita, um estado de viabilidade com três classes e o motivo de cada caso desconhecido. Todos os membros emitem estas linhas.
 - [Equipamentos flexíveis](#equipamentos-flexíveis): Serviço dos ciclos dos equipamentos flexíveis (diferíveis) a partir dos estados dos ciclos e das energias nominais dos ciclos. Todos os membros emitem estas linhas; sem equipamentos, as contagens e energias são 0 e as taxas ficam indefinidas.
 - [Auditoria dos equipamentos flexíveis](#auditoria-dos-equipamentos-flexíveis): Serviço auditado dos ciclos dos equipamentos flexíveis a partir da energia medida nos intervalos executados, com uma população explícita e estados exclusivos. Todos os membros emitem estas linhas.
@@ -629,6 +630,38 @@ As taxas viáveis antigas contam como viáveis as partidas com dados em falta e 
 - Como o BAU nunca usa V2G, `ev_ratio_to_business_as_usual_v2g_export_total_ratio` fica indefinido sempre que o controlador descarrega um VE.
 - Com topologia dinâmica, as linhas `ev_events` contam também partidas em carregadores históricos inativos nesse passo, que a auditoria ignora.
 - A simulação de viabilidade antiga só aplica os limites do edifício e das fases quando o edifício impõe restrições de carregamento.
+
+## Flexibilidade na janela de ponta
+
+KPIs opt-in emitidos quando se passa `evaluate_v2(include_peak_flexibility_audit=True, flexibility_peak_hours=(16, 19))` (por omissão `False`). Os passos `t ∈ W_peak` são aqueles cuja hora do relógio de 24 horas pertence a `[start_hour, end_hour)` (ou `[start_hour, 24) ∪ [0, end_hour)` quando `start_hour > end_hour`).
+
+A família separa a redução líquida da carga face à execução BAU do contributo dos carregadores de VE, mantendo cada definição invariante quer o BAU esteja ativo ou desativado:
+
+```text
+Δh = duração do passo em horas
+
+1. Redução da carga face ao BAU (definida apenas quando o BAU está disponível):
+   ΔP_net,t = (E_net,BAU,t − E_net,control,t) / Δh
+   peak_window_mean_load_reduction_to_business_as_usual_kw = média_{t ∈ W_peak} ΔP_net,t
+   peak_window_p90_load_reduction_to_business_as_usual_kw  = P10_{t ∈ W_peak} ΔP_net,t
+   (indefinida quando include_business_as_usual=False ou W_peak é vazio)
+
+2. Contributo EV / V2X (independente do BAU):
+   E_ch,t     = Σ_c E_carregador,c,t    (0 sem carregadores ou VE ligados)
+   P_ev_dis,t = −E_ch,t / Δh
+   ev_peak_window_net_export_kwh         = máx(0, Σ_{t ∈ W_peak} −E_ch,t)
+   ev_peak_window_mean_net_discharge_kw  = média_{t ∈ W_peak} P_ev_dis,t
+   ev_peak_window_p90_net_discharge_kw   = P10_{t ∈ W_peak} P_ev_dis,t
+   (0 sem VE quer o BAU esteja ativo ou desativado; potências indefinidas apenas se W_peak for vazio)
+```
+
+`P10` é o percentil 10 nos passos da janela de ponta, isto é, o nível igualado ou superado em 90% dos passos de ponta (entrega firme P90).
+
+**Distrito.** Calculado a partir da série elétrica líquida do distrito e da soma das séries dos carregadores do distrito em `W_peak`.
+
+**Portefólio.** `ev_peak_window_net_export_kwh` (`_kwh`) é somado entre comunidades; as linhas `_kw` não passam para o portefólio.
+
+**Que KPI usar.** Use `peak_window_*_load_reduction_to_business_as_usual_kw` para medir a redução total de ponta do edifício ou do distrito face ao BAU, e `ev_peak_window_*` para isolar a energia e potência V2X dos VE na janela de ponta.
 
 ## Auditoria das partidas dos VE
 

@@ -232,6 +232,8 @@ class MultiCommunityEnv(Env):
         baseline_condition: EvaluationCondition = None,
         comfort_band: float = None,
         include_business_as_usual: bool = True,
+        include_peak_flexibility_audit: bool = False,
+        flexibility_peak_hours: Tuple[int, int] = (16, 19),
     ) -> pd.DataFrame:
         """Return each community's KPIs plus portfolio rows aggregated from their district KPIs.
 
@@ -251,6 +253,8 @@ class MultiCommunityEnv(Env):
                 baseline_condition=baseline_condition,
                 comfort_band=comfort_band,
                 include_business_as_usual=include_business_as_usual,
+                include_peak_flexibility_audit=include_peak_flexibility_audit,
+                flexibility_peak_hours=flexibility_peak_hours,
             )
             for community_id, env in self.envs.items()
         })

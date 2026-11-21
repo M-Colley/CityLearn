@@ -583,6 +583,43 @@
       is the sum of the member values.'
     pt: 'Por membro, max(ganho de SOC − total de carga, 0): ganho de SOC não explicado pela carga medida; o valor
       do distrito é a soma dos valores dos membros.'
+- id: peak_flexibility
+  title:
+    en: Peak-window flexibility
+    pt: Flexibilidade na janela de ponta
+  intro:
+    en: Opt-in peak-window net load reduction relative to business as usual (BAU) and EV V2X contribution over
+      `flexibility_peak_hours`; the rows appear when `evaluate_v2(include_peak_flexibility_audit=True)` is passed.
+    pt: Redução líquida da carga face à execução BAU e contributo V2X dos VE na janela de ponta `flexibility_peak_hours`;
+      as linhas aparecem quando se passa `evaluate_v2(include_peak_flexibility_audit=True)`.
+  kpis:
+  - names: peak_window_{mean,p90}_load_reduction_to_business_as_usual_kw
+    levels:
+    - building
+    - district
+    unit: kW
+    en: Mean and P90 firm (10th-percentile) net load reduction `BAU_net_kw − control_net_kw` during
+      `flexibility_peak_hours`; undefined when BAU is unavailable (`include_business_as_usual=False`).
+    pt: Redução líquida média e firme P90 (percentil 10) da carga `BAU_net_kw − control_net_kw` durante
+      `flexibility_peak_hours`; indefinida quando o BAU não está disponível (`include_business_as_usual=False`).
+  - names: ev_peak_window_net_export_kwh
+    levels:
+    - building
+    - district
+    unit: kWh
+    en: Non-negative net AC energy exported by EV chargers into the building or district during `flexibility_peak_hours`,
+      independent of BAU (0 without EVs).
+    pt: Energia AC líquida não negativa injetada pelos carregadores de VE no edifício ou distrito durante
+      `flexibility_peak_hours`, independente do BAU (0 sem VE).
+  - names: ev_peak_window_{mean,p90}_net_discharge_kw
+    levels:
+    - building
+    - district
+    unit: kW
+    en: Mean and P90 firm (10th-percentile) net AC EV discharge power `−charger_power_kw` during
+      `flexibility_peak_hours`, independent of BAU (0 without EVs).
+    pt: Potência AC líquida média e firme P90 (percentil 10) de descarga dos VE `−charger_power_kw` durante
+      `flexibility_peak_hours`, independente do BAU (0 sem VE).
 - id: ev_departure_audit
   title:
     en: EV departure audit

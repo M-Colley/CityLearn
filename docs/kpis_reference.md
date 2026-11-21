@@ -114,6 +114,7 @@ explained in its own section below:
 - [Batteries](kpis_reference.md#batteries): Activity and wear of the stationary batteries; the rows appear in every run, with zero energy and undefined cycles and fade for members without a battery.
 - [Electrical service and phases](kpis_reference.md#electrical-service-and-phases): Compliance with the declared total and per-phase power limits of the electrical service, and the balance and peaks of the phases; the values are zero or undefined unless the schema configures an electrical service.
 - [Electric vehicles](kpis_reference.md#electric-vehicles): Departure service, charging and V2G energy of electric vehicles at the members' chargers. Every member emits these rows; without chargers, counts and energies are 0 and rates are undefined.
+- [Peak-window flexibility](kpis_reference.md#peak-window-flexibility): Opt-in peak-window net load reduction relative to business as usual (BAU) and EV V2X contribution over `flexibility_peak_hours`; the rows appear when `evaluate_v2(include_peak_flexibility_audit=True)` is passed.
 - [EV departure audit](kpis_reference.md#ev-departure-audit): Audited EV departure service, with an explicit population, a three-way feasibility status and the reason for each unknown case. Every member emits these rows.
 - [Flexible appliances](kpis_reference.md#flexible-appliances): Cycle service of deferrable (flexible) appliances from their cycle states and nominal cycle energies. Every member emits these rows; without appliances, counts and energies are 0 and rates are undefined.
 - [Flexible-appliance audit](kpis_reference.md#flexible-appliance-audit): Audited cycle service of flexible appliances from metered energy in executed intervals, with an explicit population and exclusive states. Every member emits these rows.
@@ -625,6 +626,38 @@ The legacy feasible rates count departures with missing data as feasible, and th
 - Because the BAU never uses V2G, `ev_ratio_to_business_as_usual_v2g_export_total_ratio` is undefined whenever the controller discharges an EV.
 - Under dynamic topology, the `ev_events` rows also count departures at historical chargers that are inactive at that step, which the audit skips.
 - The legacy feasibility replay applies building and phase limits only when the building enforces charging constraints.
+
+## Peak-window flexibility
+
+Opt-in KPIs emitted when `evaluate_v2(include_peak_flexibility_audit=True, flexibility_peak_hours=(16, 19))` is passed (default `False`). Steps `t ∈ W_peak` are those whose 24-hour clock hour falls in `[start_hour, end_hour)` (or `[start_hour, 24) ∪ [0, end_hour)` when `start_hour > end_hour`).
+
+The family separates member/district load reduction relative to business as usual (BAU) from the contribution of EV chargers, keeping each definition invariant whether BAU is enabled or disabled:
+
+```text
+Δh = step length in hours
+
+1. Load reduction relative to BAU (defined only when BAU is available):
+   ΔP_net,t = (E_net,BAU,t − E_net,control,t) / Δh
+   peak_window_mean_load_reduction_to_business_as_usual_kw = mean_{t ∈ W_peak} ΔP_net,t
+   peak_window_p90_load_reduction_to_business_as_usual_kw  = P10_{t ∈ W_peak} ΔP_net,t
+   (undefined when include_business_as_usual=False or W_peak is empty)
+
+2. EV / V2X contribution (independent of BAU):
+   E_ch,t     = Σ_c E_charger,c,t      (0 when no EV chargers or connected EVs)
+   P_ev_dis,t = −E_ch,t / Δh
+   ev_peak_window_net_export_kwh         = max(0, Σ_{t ∈ W_peak} −E_ch,t)
+   ev_peak_window_mean_net_discharge_kw  = mean_{t ∈ W_peak} P_ev_dis,t
+   ev_peak_window_p90_net_discharge_kw   = P10_{t ∈ W_peak} P_ev_dis,t
+   (0 without EVs whether BAU is enabled or disabled; power rows undefined only when W_peak is empty)
+```
+
+`P10` is the 10th percentile across peak-window steps, i.e., the level matched or exceeded on 90% of peak steps (P90 firm delivery).
+
+**District.** Computed from the district net electricity series and summed district charger electricity series over `W_peak`.
+
+**Portfolio.** `ev_peak_window_net_export_kwh` (`_kwh`) is summed across communities; the `_kw` rows have no portfolio row.
+
+**Which KPI.** Use `peak_window_*_load_reduction_to_business_as_usual_kw` for whole-building or whole-district peak shaving (stationary batteries, HVAC, flexible loads and EVs combined) relative to BAU, and `ev_peak_window_*` to isolate EV V2X energy and power during peak hours.
 
 ## EV departure audit
 
