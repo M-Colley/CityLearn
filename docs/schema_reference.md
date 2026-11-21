@@ -46,6 +46,7 @@ Portuguese version: [pt/schema_reference.md](pt/schema_reference.md).
 | `demand_response` | object | no | Dataset-driven DSO/TSO flexibility requests and settlement. |
 | `robustness` | object | no | Dataset-driven observation, forecast, action and asset availability perturbations. |
 | `community_market` | object | no | Local market and market KPIs. |
+| `district_electrical_service` | object | no | Shared district feeder import/export limits, see [District Electrical Service](#district-electrical-service). |
 | `ev_departure_within_tolerance` | float | no | Symmetric departure SOC accuracy tolerance, default `0.05`. |
 | `ev_departure_service_tolerance` | float | no | Lower departure SOC service tolerance for minimum acceptable EV service, default `0.05`. |
 | `render_mode` | string | no | `none`, `during` or `end`. |
@@ -305,6 +306,24 @@ violation. A limit of 0 kW does not island the building; use [`power_outage`](#b
 for a blackout. Per-phase limits stay static. The `available_grid_power` observation reports
 the limit for the coming interval; the headroom observations describe the last executed
 interval, so they reflect the limit that was in force then.
+
+### District Electrical Service
+
+`district_electrical_service` (or the `district_electrical_service` argument of `CityLearnEnv`, which overrides the schema and is recorded in `effective_schema`, `physical_configuration_sha256` and `compare_manifests()`) configures an opt-in shared district feeder envelope across grid-connected buildings:
+
+```json
+"district_electrical_service": {
+  "enabled": true,
+  "limits": {
+    "import_kw": 50.0,
+    "export_kw": 20.0
+  }
+}
+```
+
+- **Limits and schedule anchoring.** Either `import_kw` or `export_kw` may be omitted, `null` or `Infinity` (unconstrained in that direction), a non-negative scalar in kW, or a per-step sequence in kW. Sequences are anchored to dataset step `0` (`global_step = episode_start_time_step + time_step`); a sequence shorter than the executed dataset window raises `ValueError` at construction or `reset()`.
+- **Coordination and building limits.** Charging and discharging controls are coordinated jointly while preserving each building's own feasible total and per-phase `electrical_service` limits. Pauseable minimum-power deadband devices use exact subset enumeration up to 16 devices (`2^16` subsets) or up to 65,536 multiplicity-grouped combinations when devices share identical bounds, and bounded 2,048-bucket quantized-interval dynamic programming with greedy prefix trajectories for larger heterogeneous districts.
+- **Telemetry.** `feeder_curtailed_import_kwh`, `feeder_curtailed_export_kwh` and `feeder_limit_violation_kw` remain empty (`length 0`) after `reset()` until the first `step()` is executed; unavoidable exceedances are recorded and the simulation continues.
 
 ## Chargers
 

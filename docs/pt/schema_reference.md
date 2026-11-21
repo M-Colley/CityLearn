@@ -44,6 +44,7 @@ Esta pagina documenta o contrato do `schema.json`. O schema e a fonte oficial pa
 | `demand_response` | object | nao | Pedidos DSO/TSO de flexibilidade e settlement orientados por dataset. |
 | `robustness` | object | nao | Perturbacoes orientadas por dataset para observacoes, forecasts, acoes e assets. |
 | `community_market` | object | nao | Mercado local e KPIs associados. |
+| `district_electrical_service` | object | nao | Limites partilhados de importacao/exportacao do alimentador do distrito, ver [Servico Eletrico do Distrito](#servico-eletrico-do-distrito). |
 | `ev_departure_within_tolerance` | float | nao | Tolerancia simetrica de accuracy do SOC no departure, default `0.05`. |
 | `ev_departure_service_tolerance` | float | nao | Tolerancia inferior de servico EV minimo no departure, default `0.05`. |
 | `render_mode` | string | nao | `none`, `during`, `end`. |
@@ -265,6 +266,24 @@ finitos e nao negativos. Os carregadores de EV e a bateria sao limitados primeir
 nao controlavel continua servida e conta como violacao do servico eletrico. 0 kW nao isola o
 edificio; use `power_outage` para um apagao. A observacao `available_grid_power` indica o
 limite do proximo intervalo; o headroom descreve o ultimo intervalo executado.
+
+### Servico Eletrico do Distrito
+
+`district_electrical_service` (ou o argumento `district_electrical_service` de `CityLearnEnv`, que sobrepoe o schema e fica registado em `effective_schema`, `physical_configuration_sha256` e `compare_manifests()`) configura um envelope opt-in partilhado do alimentador do distrito nos edificios ligados a rede:
+
+```json
+"district_electrical_service": {
+  "enabled": true,
+  "limits": {
+    "import_kw": 50.0,
+    "export_kw": 20.0
+  }
+}
+```
+
+- **Limites e ancoragem temporal.** `import_kw` e `export_kw` podem ser omitidos, `null` ou `Infinity` (sem limite nesse sentido), um escalar nao negativo em kW ou uma sequencia por step em kW. As sequencias sao ancoradas no step `0` do dataset (`global_step = episode_start_time_step + time_step`); uma sequencia mais curta do que a janela executada do dataset levanta `ValueError` na construcao ou no `reset()`.
+- **Coordenacao e limites dos edificios.** Os controlos de carga e de descarga sao coordenados em conjunto preservando os limites totais e por fase viaveis de `electrical_service` de cada edificio. Dispositivos com potencia minima usam enumeracao exata ate 16 dispositivos (`2^16` subconjuntos) ou ate 65 536 combinacoes agrupadas por multiplicidade quando partilham limites identicos, e programacao dinamica quantizada com 2 048 intervalos para distritos heterogeneos maiores.
+- **Telemetria.** `feeder_curtailed_import_kwh`, `feeder_curtailed_export_kwh` e `feeder_limit_violation_kw` ficam vazios (`comprimento 0`) apos `reset()` ate que o primeiro `step()` seja executado; excessos inevitaveis sao registados e a simulacao continua.
 
 ## Chargers
 
