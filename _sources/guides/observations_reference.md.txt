@@ -247,8 +247,7 @@ Demand-response `request_id` and baseline validity are exposed in `observations[
 |---|---|---:|---|
 | `soc`, `capacity_kwh`, `nominal_power_kw`, `electricity_consumption_kwh` | legacy | mixed | BESS state and settled consumption. |
 | `min_charge_power_kw`, `min_discharge_power_kw` | `entity_base` | kW | Technical minimum powers. |
-| `efficiency_ratio` | `entity_base` | ratio | Rated round-trip efficiency. |
-| `round_trip_efficiency_ratio` | `entity_base` | ratio | One-way efficiency at the last operation, the square root of the current round-trip efficiency. The name is kept for existing observation layouts. |
+| `efficiency_ratio`, `round_trip_efficiency_ratio` | `entity_base` | ratio | Base and round-trip efficiency. |
 | `phase_connection_L1/L2/L3` | `entity_base` | one-hot | Storage phase connection. |
 | `electrical_storage_soc_ratio` | `entity_core_electrical` | ratio | Canonical BESS SOC. |
 | `max_charge_power_kw`, `max_discharge_power_kw` | `entity_core_electrical` | kW | Current max powers. |
@@ -262,12 +261,12 @@ Demand-response `request_id` and baseline validity are exposed in `observations[
 
 ### `pv`
 
-Only present when `entity_core_electrical` is enabled. Like the other core-bundle electrical features, these are endogenous values of the last settled interval, not exogenous inputs of the coming one.
+Only present when `entity_core_electrical` is enabled.
 
 | Feature | Unit | Meaning |
 |---|---:|---|
-| `generation_power_kw` | kW | PV generation as power, in the last settled interval (row t). |
-| `generation_energy_kwh_step` | kWh/step | PV generation in the last settled interval (row t when the observation is for t+1); `building.solar_generation` is the upcoming interval (row t+1). |
+| `generation_power_kw` | kW | PV generation as power. |
+| `generation_energy_kwh_step` | kWh/step | PV generation in current step. |
 | `installed_power_kw` | kW | Installed PV power. |
 | `generation_capacity_factor_ratio` | ratio | `generation_power_kw / installed_power_kw`. |
 
