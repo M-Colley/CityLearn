@@ -20,6 +20,7 @@ As linhas presentes dependem dos equipamentos e serviços do cenário.
 | [Autoconsumo solar](#autoconsumo-solar) | 38 |
 | [Mercado comunitário](#mercado-comunitário) | 36 |
 | [Baterias](#baterias) | 40 |
+| [Saúde e desgaste das baterias](#saúde-e-desgaste-das-baterias) | 12 |
 | [Serviço elétrico e fases](#serviço-elétrico-e-fases) | 22 |
 | [Veículos elétricos](#veículos-elétricos) | 62 |
 | [Auditoria das partidas dos VE](#auditoria-das-partidas-dos-ve) | 128 |
@@ -455,6 +456,41 @@ district_battery_total_discharge_kwh
 district_battery_total_throughput_business_as_usual_kwh
 district_battery_total_throughput_delta_to_business_as_usual_kwh
 district_battery_total_throughput_kwh
+```
+
+</details>
+
+## Saúde e desgaste das baterias
+
+Estado de saúde terminal, perda de capacidade e ciclos completos equivalentes opt-in das baterias estacionárias e dos veículos elétricos; as linhas aparecem quando se passa `evaluate_v2(include_battery_health_audit=True)`.
+
+Equações e regras: [Saúde e desgaste das baterias](kpis_reference.md#saúde-e-desgaste-das-baterias).
+
+| Nomes | Níveis | Unidade | Significado |
+|---|---|---|---|
+| `battery_health_terminal_soh_ratio` | building, district | ratio | Estado de saúde terminal das baterias estacionárias ponderado pela capacidade, capacidade degradada / capacidade nominal em [0, 1]; agregado pela capacidade nominal no distrito e no portefólio, e indefinido quando a capacidade nominal ≤ 0. |
+| `battery_health_capacity_fade_kwh` | building, district | kWh | Capacidade acumulada das baterias estacionárias perdida por degradação, máx(0, capacidade nominal − capacidade degradada), somada sobre os membros e as comunidades. |
+| `ev_battery_terminal_soh_ratio` | building, district | ratio | Estado de saúde terminal das baterias dos VE ponderado pela capacidade em [0, 1], lido na última ligação efetiva de cada VE ao nível do edifício e agregado sobre os VE elegíveis únicos da frota pela capacidade nominal no distrito e no portefólio; indefinido quando a capacidade nominal ≤ 0. |
+| `ev_battery_capacity_fade_kwh` | building, district | kWh | Capacidade acumulada das baterias dos VE perdida por degradação em [kWh], atribuída às transferências executadas nos carregadores do membro ao nível do edifício e somada sobre os VE elegíveis únicos da frota no distrito e no portefólio. |
+| `ev_battery_capacity_fade_ratio` | building, district | ratio | Fração da capacidade nominal das baterias dos VE perdida por degradação em [0, 1], a partir das transferências executadas sobre a capacidade dos VE efetivamente ligados no edifício e agregada pela capacidade nominal dos VE elegíveis únicos da frota no distrito e no portefólio; indefinida quando a capacidade nominal ≤ 0. |
+| `ev_battery_equivalent_full_cycles_count` | building, district | count | Ciclos completos equivalentes das baterias dos VE a partir da energia bruta aceite nos terminais da bateria sobre (2 · capacidade nominal), atribuídos às transferências executadas sobre a capacidade dos VE efetivamente ligados no edifício e agregados pela capacidade nominal dos VE elegíveis únicos da frota no distrito e no portefólio. |
+
+<details>
+<summary>Todos os 12 nomes</summary>
+
+```text
+building_battery_health_capacity_fade_kwh
+building_battery_health_terminal_soh_ratio
+building_ev_battery_capacity_fade_kwh
+building_ev_battery_capacity_fade_ratio
+building_ev_battery_equivalent_full_cycles_count
+building_ev_battery_terminal_soh_ratio
+district_battery_health_capacity_fade_kwh
+district_battery_health_terminal_soh_ratio
+district_ev_battery_capacity_fade_kwh
+district_ev_battery_capacity_fade_ratio
+district_ev_battery_equivalent_full_cycles_count
+district_ev_battery_terminal_soh_ratio
 ```
 
 </details>

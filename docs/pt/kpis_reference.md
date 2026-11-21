@@ -113,6 +113,7 @@ explicada na sua secção:
 - [Autoconsumo solar](#autoconsumo-solar): Produção fotovoltaica (FV) e quanto dela é usado dentro de cada membro ou do distrito em vez de ser exportado ou cortado; as linhas aparecem em todas as execuções e são nulas ou indefinidas sem FV.
 - [Mercado comunitário](#mercado-comunitário): Troca local de energia entre os membros de uma comunidade e a respetiva liquidação. As linhas aparecem em todas as simulações (a zero, ou com quotas indefinidas, quando `community_market.enabled` é falso), exceto `local_traded` e `import_share`, que exigem o mercado e os respetivos interruptores de KPI.
 - [Baterias](#baterias): Atividade e desgaste das baterias estacionárias; as linhas aparecem em todas as execuções, com energia nula e ciclos e perda de capacidade indefinidos para membros sem bateria.
+- [Saúde e desgaste das baterias](#saúde-e-desgaste-das-baterias): Estado de saúde terminal, perda de capacidade e ciclos completos equivalentes opt-in das baterias estacionárias e dos veículos elétricos; as linhas aparecem quando se passa `evaluate_v2(include_battery_health_audit=True)`.
 - [Serviço elétrico e fases](#serviço-elétrico-e-fases): Cumprimento dos limites de potência total e por fase declarados para o serviço elétrico, e o equilíbrio e os picos das fases; os valores são nulos ou indefinidos se o esquema não configurar um serviço elétrico.
 - [Veículos elétricos](#veículos-elétricos): Serviço à partida, energia de carregamento e V2G dos veículos elétricos (VE) nos carregadores dos membros. Todos os membros emitem estas linhas; sem carregadores, as contagens e energias são 0 e as taxas ficam indefinidas.
 - [Auditoria das partidas dos VE](#auditoria-das-partidas-dos-ve): Serviço auditado às partidas dos VE, com uma população explícita, um estado de viabilidade com três classes e o motivo de cada caso desconhecido. Todos os membros emitem estas linhas.
@@ -457,6 +458,31 @@ perda_distrito = Σ_b max(capacidade_b − capacidade_deg_b, 0) / Σ_b capacidad
 
 **Limitações conhecidas.**
 - A capacidade degradada é lida no momento da avaliação, e não no fim da janela ativa do membro.
+
+## Saúde e desgaste das baterias
+
+KPIs opt-in de estado de saúde (SOH), degradação e ciclos completos equivalentes das baterias estacionárias e dos veículos elétricos (`ElectricVehicle.battery`), emitidos quando se passa `evaluate_v2(include_battery_health_audit=True)` (por omissão `False`).
+
+```text
+C_i      = capacidade nominal da bateria i (> 0), em kWh
+T_i      = Σ_t (carga_i,t + descarga_i,t), energia bruta aceite nos terminais da bateria em kWh
+C_deg,i  = clip(capacidade degradada da bateria i, 0, C_i), em kWh
+perda_i  = máx(0, C_i − C_deg,i), em kWh
+EFC_i    = T_i / (2 · C_i)
+
+terminal_soh_ratio         = clip(Σ_i C_deg,i / Σ_i C_i, 0, 1)      indefinido quando Σ_i C_i ≤ 0
+capacity_fade_kwh          = Σ_i perda_i                            0 quando Σ_i C_i ≤ 0
+capacity_fade_ratio        = clip(Σ_i perda_i / Σ_i C_i, 0, 1)      indefinido quando Σ_i C_i ≤ 0
+equivalent_full_cycles     = Σ_i T_i / (2 · Σ_i C_i)                indefinido quando Σ_i C_i ≤ 0
+```
+
+Ao nível do edifício, as linhas estacionárias (`battery_health_terminal_soh_ratio`, `battery_health_capacity_fade_kwh`) agregam as baterias estacionárias únicas do membro (`capacity > 0`). As linhas de VE (`ev_battery_*`) usam apenas ligações efetivas (`past_connected_evs[t]`) e transferências executadas durante os passos ativos executados do membro (`0 ≤ t < time_step`): a energia movimentada e a perda de capacidade são atribuídas estritamente ao edifício cujo carregador executou a transferência, `Σ C_i` conta uma única vez cada VE único (`capacity > 0`) que efetivamente se ligou nesse edifício, e `building_ev_battery_terminal_soh_ratio` lê a capacidade degradada de cada VE ligado no fim da sua última ligação efetiva nesse edifício. Os VE listados apenas em horários de carregadores desligados (ou apenas em passos não executados) são excluídos (`capacity_fade_kwh = 0`, rácios e ciclos indefinidos quando nenhum VE se liga efetivamente).
+
+**Distrito.** As linhas estacionárias agregam todas as baterias estacionárias únicas dos membros (`capacity > 0`) pela capacidade nominal. As linhas de VE agregam a população da frota de VE do distrito, definida como os VE elegíveis únicos com `capacity > 0`: os `electric_vehicles` incluídos em topologia estática, ou os VE que entraram em participação durante o episódio (`electric_vehicles` união com os VE suspensos) em topologia dinâmica. Cada VE elegível é contado uma única vez independentemente do número de edifícios onde se liga; os VE elegíveis da frota que nunca se ligam durante o episódio contribuem com a sua capacidade nominal com energia movimentada nula, perda nula e SOH terminal `1.0`.
+
+**Portefólio.** `*_capacity_fade_kwh` é somado entre comunidades. Os rácios de saúde e desgaste (`portfolio_battery_health_terminal_soh_ratio`, `portfolio_ev_battery_terminal_soh_ratio`, `portfolio_ev_battery_capacity_fade_ratio`) e `portfolio_ev_battery_equivalent_full_cycles_count` são calculados a partir dos totais agregados de capacidade nominal e de perda/energia movimentada entre comunidades (`indefinido` quando a capacidade nominal total é zero).
+
+**Que KPI usar.** Use `terminal_soh_ratio` e `capacity_fade_kwh` juntamente com `equivalent_full_cycles_count` para avaliar o desgaste das baterias devido à ciclagem e ao despacho V2G.
 
 ## Serviço elétrico e fases
 

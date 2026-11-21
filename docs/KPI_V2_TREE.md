@@ -20,6 +20,7 @@ Which rows appear depends on the scenario's assets and services.
 | [Solar self-consumption](#solar-self-consumption) | 38 |
 | [Community market](#community-market) | 36 |
 | [Batteries](#batteries) | 40 |
+| [Battery health and wear](#battery-health-and-wear) | 12 |
 | [Electrical service and phases](#electrical-service-and-phases) | 22 |
 | [Electric vehicles](#electric-vehicles) | 62 |
 | [EV departure audit](#ev-departure-audit) | 128 |
@@ -455,6 +456,41 @@ district_battery_total_discharge_kwh
 district_battery_total_throughput_business_as_usual_kwh
 district_battery_total_throughput_delta_to_business_as_usual_kwh
 district_battery_total_throughput_kwh
+```
+
+</details>
+
+## Battery health and wear
+
+Opt-in terminal state of health, capacity fade and EV equivalent full cycles for stationary and electric-vehicle batteries; the rows appear when `evaluate_v2(include_battery_health_audit=True)` is passed.
+
+Equations and rules: [Battery health and wear](kpis_reference.md#battery-health-and-wear).
+
+| Names | Levels | Unit | Meaning |
+|---|---|---|---|
+| `battery_health_terminal_soh_ratio` | building, district | ratio | Capacity-weighted terminal stationary battery state of health, degraded capacity / nominal capacity in [0, 1]; pooled by nominal capacity at district and portfolio levels, and undefined when nominal capacity ≤ 0. |
+| `battery_health_capacity_fade_kwh` | building, district | kWh | Cumulative stationary battery capacity lost to degradation, max(0, nominal capacity − degraded capacity), summed over members and communities. |
+| `ev_battery_terminal_soh_ratio` | building, district | ratio | Capacity-weighted terminal EV battery state of health in [0, 1], read at the last realized connection per EV at building level and pooled over unique eligible fleet EVs by nominal capacity at district and portfolio levels; undefined when nominal capacity ≤ 0. |
+| `ev_battery_capacity_fade_kwh` | building, district | kWh | Cumulative EV battery capacity lost to degradation in [kWh], attributed to executed transfers at the member's chargers at building level and summed over unique eligible fleet EVs at district and portfolio levels. |
+| `ev_battery_capacity_fade_ratio` | building, district | ratio | Fraction of nominal EV battery capacity lost to degradation in [0, 1], from executed transfers over realized connected EV capacity at building level and pooled over unique eligible fleet EV nominal capacity at district and portfolio levels; undefined when nominal capacity ≤ 0. |
+| `ev_battery_equivalent_full_cycles_count` | building, district | count | Equivalent full cycles of EV batteries from accepted gross battery-terminal throughput over (2 · nominal capacity), attributed to executed transfers over realized connected EV capacity at building level and pooled over unique eligible fleet EV nominal capacity at district and portfolio levels. |
+
+<details>
+<summary>All 12 names</summary>
+
+```text
+building_battery_health_capacity_fade_kwh
+building_battery_health_terminal_soh_ratio
+building_ev_battery_capacity_fade_kwh
+building_ev_battery_capacity_fade_ratio
+building_ev_battery_equivalent_full_cycles_count
+building_ev_battery_terminal_soh_ratio
+district_battery_health_capacity_fade_kwh
+district_battery_health_terminal_soh_ratio
+district_ev_battery_capacity_fade_kwh
+district_ev_battery_capacity_fade_ratio
+district_ev_battery_equivalent_full_cycles_count
+district_ev_battery_terminal_soh_ratio
 ```
 
 </details>

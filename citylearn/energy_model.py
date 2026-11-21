@@ -1277,6 +1277,103 @@ class Battery(StorageDevice, ElectricDevice):
         return self.capacity_history[-1]
 
     @property
+    def current_state_of_health(self) -> float:
+        r"""Current state of health (SOH) ratio ``degraded_capacity / capacity`` in ``[0.0, 1.0]``.
+
+        Returns ``1.0`` when ``capacity <= 0``.
+        """
+
+        cap = float(self.capacity)
+        if not np.isfinite(cap) or cap <= 0.0:
+            return 1.0
+
+        return float(clip_scalar(float(self.degraded_capacity) / cap, 0.0, 1.0))
+
+    @property
+    def state_of_health(self) -> np.ndarray:
+        r"""State of health (SOH) time series up to ``time_step + 1`` in ``[0.0, 1.0]``.
+
+        Returns ones when ``capacity <= 0``.
+        """
+
+        t = getattr(self, 'time_step', None)
+        n = 1 if t is None else max(int(t) + 1, 1)
+        cap = float(self.capacity)
+        if not np.isfinite(cap) or cap <= 0.0:
+            return np.ones(n, dtype='float64')
+
+        before = getattr(self, 'capacity_before_step', None)
+        if before is None or t is None or int(t) <= 0:
+            return np.full(n, self.current_state_of_health, dtype='float64')
+
+        caps = np.full(n, np.nan, dtype='float64')
+        upper = min(n - 1, max(len(before) - 1, 0))
+        if upper > 0:
+            caps[:upper] = before[1:upper + 1]
+        caps[n - 1] = float(self.degraded_capacity)
+
+        if np.isnan(caps).any():
+            next_valid = float(self.degraded_capacity)
+            if not np.isfinite(next_valid):
+                next_valid = cap
+            for idx in range(n - 1, -1, -1):
+                if np.isfinite(caps[idx]):
+                    next_valid = caps[idx]
+                else:
+                    caps[idx] = next_valid
+
+        return np.clip(caps / cap, 0.0, 1.0)
+
+    @property
+    def equivalent_full_cycles(self) -> float:
+        r"""Cumulative equivalent full cycles from accepted gross battery-terminal throughput over ``2 * capacity``."""
+
+        cap = float(self.capacity)
+        if not np.isfinite(cap) or cap <= 0.0:
+            return 0.0
+
+        t = getattr(self, 'time_step', None)
+        charge = getattr(self, 'gross_energy_charge', None)
+        discharge = getattr(self, 'gross_energy_discharge', None)
+        if charge is not None and discharge is not None:
+            end_c = len(charge) if t is None else min(max(int(t) + 1, 0), len(charge))
+            end_d = len(discharge) if t is None else min(max(int(t) + 1, 0), len(discharge))
+            charge_series = np.asarray(charge[:end_c], dtype='float64')
+            discharge_series = np.asarray(discharge[:end_d], dtype='float64')
+            gross_kwh = (
+                float(charge_series[np.isfinite(charge_series)].sum())
+                + float(discharge_series[np.isfinite(discharge_series)].sum())
+            )
+            return float(max(0.0, gross_kwh) / (2.0 * cap))
+
+        try:
+            balances = self.energy_balance
+        except AttributeError:
+            return 0.0
+
+        end = len(balances) if t is None else min(max(int(t) + 1, 0), len(balances))
+        if end <= 0:
+            return 0.0
+
+        series = np.asarray(balances[:end], dtype='float64')
+        finite = series[np.isfinite(series)]
+        if finite.size == 0:
+            return 0.0
+
+        return float(np.abs(finite).sum() / (2.0 * cap))
+
+    @property
+    def capacity_fade_kwh(self) -> float:
+        r"""Cumulative storage capacity lost to degradation in [kWh]."""
+
+        cap = float(self.capacity)
+        degraded = float(self.degraded_capacity)
+        if not np.isfinite(cap) or not np.isfinite(degraded) or cap <= 0.0:
+            return 0.0
+
+        return float(max(0.0, cap - degraded))
+
+    @property
     def capacity_loss_coefficient(self) -> float:
         """Battery degradation; storage capacity lost in each charge and discharge cycle (as a fraction of the total capacity)."""
 
