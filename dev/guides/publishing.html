@@ -303,10 +303,13 @@ still include both the banner selector and the <strong>Other versions</strong> s
 when <code class="docutils literal notranslate"><span class="pre">scripts/ci/run_notebooks.py</span> <span class="pre">--output-dir</span></code> is absent.</p>
 <p>Site staging details (<code class="docutils literal notranslate"><span class="pre">scripts/ci/prepare_docs_site.py</span></code>):</p>
 <ul class="simple">
+<li><p>Before staging, <code class="docutils literal notranslate"><span class="pre">deploy</span></code> probes <code class="docutils literal notranslate"><span class="pre">origin</span></code> (<code class="docutils literal notranslate"><span class="pre">--probe-remote</span></code>) to distinguish a verified first deployment (<code class="docutils literal notranslate"><span class="pre">gh-pages</span></code>
+absent on a reachable remote) from a read or checkout failure, aborting immediately if an existing <code class="docutils literal notranslate"><span class="pre">gh-pages</span></code> branch
+cannot be read.</p></li>
 <li><p>Each deployment stages the <code class="docutils literal notranslate"><span class="pre">gh-pages</span></code> tree in one atomic commit. Every file in <code class="docutils literal notranslate"><span class="pre">stable/</span></code> is mirrored to <code class="docutils literal notranslate"><span class="pre">/</span></code> so
 shared pages serve the stable release directly; root HTML URLs absent from <code class="docutils literal notranslate"><span class="pre">stable/</span></code> receive a relative redirect
-stub to <code class="docutils literal notranslate"><span class="pre">/dev/&lt;page&gt;</span></code> when that page exists under <code class="docutils literal notranslate"><span class="pre">/dev/</span></code>, and files absent from both <code class="docutils literal notranslate"><span class="pre">stable/</span></code> and <code class="docutils literal notranslate"><span class="pre">dev/</span></code> are
-removed.</p></li>
+stub to <code class="docutils literal notranslate"><span class="pre">/dev/&lt;page&gt;</span></code> when <code class="docutils literal notranslate"><span class="pre">/dev/&lt;page&gt;</span></code> exists, and if <code class="docutils literal notranslate"><span class="pre">/dev/</span></code> has not been deployed yet pre-existing root pages
+remain in place until <code class="docutils literal notranslate"><span class="pre">/dev/</span></code> is published.</p></li>
 <li><p>In Settings -&gt; Environments -&gt; <code class="docutils literal notranslate"><span class="pre">github-pages</span></code>, allow deployments from <code class="docutils literal notranslate"><span class="pre">master</span></code> and from release tags <code class="docutils literal notranslate"><span class="pre">v*</span></code>.</p></li>
 </ul>
 </section>

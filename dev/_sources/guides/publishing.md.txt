@@ -114,10 +114,13 @@ when `scripts/ci/run_notebooks.py --output-dir` is absent.
 
 Site staging details (`scripts/ci/prepare_docs_site.py`):
 
+- Before staging, `deploy` probes `origin` (`--probe-remote`) to distinguish a verified first deployment (`gh-pages`
+  absent on a reachable remote) from a read or checkout failure, aborting immediately if an existing `gh-pages` branch
+  cannot be read.
 - Each deployment stages the `gh-pages` tree in one atomic commit. Every file in `stable/` is mirrored to `/` so
   shared pages serve the stable release directly; root HTML URLs absent from `stable/` receive a relative redirect
-  stub to `/dev/<page>` when that page exists under `/dev/`, and files absent from both `stable/` and `dev/` are
-  removed.
+  stub to `/dev/<page>` when `/dev/<page>` exists, and if `/dev/` has not been deployed yet pre-existing root pages
+  remain in place until `/dev/` is published.
 - In Settings -> Environments -> `github-pages`, allow deployments from `master` and from release tags `v*`.
 
 ## Version policy
