@@ -310,6 +310,9 @@ cannot be read.</p></li>
 shared pages serve the stable release directly; root HTML URLs absent from <code class="docutils literal notranslate"><span class="pre">stable/</span></code> receive a relative redirect
 stub to <code class="docutils literal notranslate"><span class="pre">/dev/&lt;page&gt;</span></code> when <code class="docutils literal notranslate"><span class="pre">/dev/&lt;page&gt;</span></code> exists, and if <code class="docutils literal notranslate"><span class="pre">/dev/</span></code> has not been deployed yet pre-existing root pages
 remain in place until <code class="docutils literal notranslate"><span class="pre">/dev/</span></code> is published.</p></li>
+<li><p>With <code class="docutils literal notranslate"><span class="pre">concurrency:</span> <span class="pre">documentation-deploy</span></code>, GitHub keeps one active deploy and at most one queued deploy, cancelling
+an earlier pending deploy when a third run joins the group. Dispatch any cancelled release or backfill deploy again
+so that version is published.</p></li>
 <li><p>In Settings -&gt; Environments -&gt; <code class="docutils literal notranslate"><span class="pre">github-pages</span></code>, allow deployments from <code class="docutils literal notranslate"><span class="pre">master</span></code> and from release tags <code class="docutils literal notranslate"><span class="pre">v*</span></code>.</p></li>
 </ul>
 </section>

@@ -121,6 +121,9 @@ Site staging details (`scripts/ci/prepare_docs_site.py`):
   shared pages serve the stable release directly; root HTML URLs absent from `stable/` receive a relative redirect
   stub to `/dev/<page>` when `/dev/<page>` exists, and if `/dev/` has not been deployed yet pre-existing root pages
   remain in place until `/dev/` is published.
+- With `concurrency: documentation-deploy`, GitHub keeps one active deploy and at most one queued deploy, cancelling
+  an earlier pending deploy when a third run joins the group. Dispatch any cancelled release or backfill deploy again
+  so that version is published.
 - In Settings -> Environments -> `github-pages`, allow deployments from `master` and from release tags `v*`.
 
 ## Version policy
