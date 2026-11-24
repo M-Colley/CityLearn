@@ -32,6 +32,8 @@ classifiers = [
 [project.optional-dependencies]
 parquet = ["pyarrow"]
 pysam = ["nrel-pysam"]
+# Optional semi-empirical battery ageing (citylearn.degradation); BLAST-Lite pins numpy<2.
+degradation = ["blast-lite"]
 # LSTM thermal dynamics (LSTMDynamics), used by the 2023 challenge, Quebec, baeda_3dem and EULP neighbourhood datasets.
 dynamics = ["torch"]
 # The bundled SAC and MARLISA controllers.

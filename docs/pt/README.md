@@ -21,6 +21,7 @@ diferença, prevalece a versão inglesa.
 | [Interfaces](interfaces_flat_entity.md) | Vetores e tabelas de entidades. |
 | [Scorecard](scorecard.md) | Como ler um conjunto compacto de KPIs. |
 | [Referências (baselines)](baselines.md) | O controlador BAU e as referências por detrás dos KPIs. |
+| [Envelhecimento da bateria](battery_degradation.md) | Perda de capacidade opcional com BLAST-Lite e verificação com o PyBaMM. |
 | [KPIs](kpis_reference.md) | Definições, unidades e famílias de indicadores. |
 | [Catálogo de KPIs](KPI_V2_TREE.md) | Todos os nomes de KPI emitidos por `evaluate_v2()`. |
 | [Várias comunidades](multi_community_reference.md) | Sincronização e indicadores agregados. |

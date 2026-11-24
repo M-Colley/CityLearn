@@ -766,6 +766,7 @@ class CityLearnLoadingService:
             'max_soc',
             'charging_efficiency',
             'discharging_efficiency',
+            'degradation',
         ]:
             if attribute in attrs:
                 battery_kwargs[attribute] = attrs[attribute]
@@ -775,6 +776,8 @@ class CityLearnLoadingService:
             battery_kwargs['nominal_power'] = attrs['nominal_power']
 
         battery = battery_constructor(**battery_kwargs)
+        if getattr(battery, '_degradation', None) is not None and battery._degradation.needs_weather:
+            raise ValueError("An electric vehicle battery degradation temperature must be a constant in [C].")
         # Physics version 1 limits battery discharge with the charging curve (#227).
         battery.legacy_discharge_power_limit = resolve_physics_version(
             getattr(self.env, 'physics_version', schema.get('physics_version'))) < 2

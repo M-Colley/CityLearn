@@ -972,6 +972,9 @@ class Building(Environment):
     @electrical_storage.setter
     def electrical_storage(self, electrical_storage: Battery):
         self.__electrical_storage = Battery(0.0, 0.0, random_seed=PLACEHOLDER_DEVICE_RANDOM_SEED, random_stream_version=self.random_stream_version) if electrical_storage is None else electrical_storage
+        degradation = getattr(self.__electrical_storage, '_degradation', None)
+        if degradation is not None and degradation.needs_weather:
+            degradation.temperature_provider = lambda time_step: self.weather.outdoor_dry_bulb_temperature[time_step]
 
     @dhw_device.setter
     def dhw_device(self, dhw_device: Union[HeatPump, ElectricHeater]):

@@ -1284,6 +1284,11 @@ class Battery(StorageDevice, ElectricDevice):
     depth_of_discharge: Union[float, Tuple[float, float]], default: 1.0
         Maximum fraction of `capacity` that can be discharged. Discharging stops at a state of charge of
         ``1 - depth_of_discharge``. It also sets the default `initial_soc`.
+    degradation: dict, optional
+        Replaces the linear capacity-loss model with BLAST-Lite, e.g. ``{"model": "blast_lite", "cell":
+        "Lfp_Gr_250AhPrismatic", "update_interval_steps": 24, "temperature": "outdoor_dry_bulb"}``. Needs
+        ``pip install citylearn[degradation]``; see :py:mod:`citylearn.degradation`. When omitted, the model
+        above applies and results are unchanged.
     discharge_power_curve: list, default: [[0.0, 1.0], [1.0, 1.0]]
         Maximum discharging power of the battery, as a fraction of `nominal_power`, as a function of the state of
         charge at the start of the step. The default discharges at `nominal_power` at any state of charge.
@@ -1311,7 +1316,11 @@ class Battery(StorageDevice, ElectricDevice):
         Other keyword arguments used to initialize super classes.
     """
     
-    def __init__(self, capacity: float = None, nominal_power: float = None, capacity_loss_coefficient: Union[float, Tuple[float, float]] = None, power_efficiency_curve: List[List[float]] = None, capacity_power_curve: List[List[float]] = None, depth_of_discharge: Union[float, Tuple[float, float]] = None, time_step_ratio: float = None, discharge_power_curve: List[List[float]] = None, **kwargs: Any):
+    def __init__(self, capacity: float = None, nominal_power: float = None, capacity_loss_coefficient: Union[float, Tuple[float, float]] = None, power_efficiency_curve: List[List[float]] = None, capacity_power_curve: List[List[float]] = None, depth_of_discharge: Union[float, Tuple[float, float]] = None, time_step_ratio: float = None, discharge_power_curve: List[List[float]] = None, degradation: Optional[Mapping[str, Any]] = None, **kwargs: Any):
+        self._degradation = None
+        if degradation:
+            from citylearn.degradation import BlastLiteDegradation
+            self._degradation = BlastLiteDegradation.from_config(degradation)
         self.legacy_discharge_power_limit = False
         self.discharge_power_curve = discharge_power_curve
         self._efficiency_history = array('d')
@@ -1540,12 +1549,22 @@ class Battery(StorageDevice, ElectricDevice):
             )
         ratio = self.time_step_ratio if self.time_step_ratio not in (None, 0) else 1.0
         if same_step_transfer and len(self._capacity_history) > 1:
-            self._capacity_history[-1] = max(degraded_capacity - self.degrade(self._last_transfer_energy), 0.0)
+            self._capacity_history[-1] = self._next_degraded_capacity(degraded_capacity, self._last_transfer_energy)
             dataset_resolution_balance = self._last_transfer_energy / ratio
         else:
-            self._capacity_history.append(max(degraded_capacity - self.degrade(), 0.0))
+            self._capacity_history.append(self._next_degraded_capacity(degraded_capacity))
             dataset_resolution_balance = self.energy_balance[self.time_step] / ratio
         self.update_electricity_consumption(dataset_resolution_balance, enforce_polarity=False)
+
+    def _next_degraded_capacity(self, degraded_capacity: float, transfer: float = None) -> float:
+        """Capacity after the current step: the linear model, or the `degradation` model when configured."""
+
+        if self._degradation is None:
+            return max(degraded_capacity - self.degrade(transfer), 0.0)
+
+        model = self._degradation
+        q = model.record(self.time_step, self.seconds_per_time_step, float(self.soc[self.time_step])/max(model.q, ZERO_DIVISION_PLACEHOLDER))
+        return as_float(self.capacity)*q
 
     def preview_charge(self, energy: float) -> float:
         """Energy that :py:meth:`charge` would apply for `energy`, without changing the battery.
@@ -1830,6 +1849,8 @@ class Battery(StorageDevice, ElectricDevice):
         super().reset()
         self._efficiency_history = self._efficiency_history[0:1]
         self._capacity_history = self._capacity_history[0:1]
+        if self._degradation is not None:
+            self._degradation.reset(float(self.soc[0]))
         self.capacity_before_step = np.full(self.episode_tracker.episode_time_steps, np.nan)
         self.capacity_before_step[0] = self.degraded_capacity
         self._step_transfer_start_energy = self.energy_init
