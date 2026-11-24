@@ -85,6 +85,7 @@ for the bibliography.
    guides/schema_reference
    guides/dataset_reference
    guides/portugal_rec_datasets
+   guides/price_carbon_datasets
    guides/data_unit_contract
    guides/interfaces_flat_entity
    guides/observations_reference

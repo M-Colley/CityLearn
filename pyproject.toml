@@ -32,6 +32,8 @@ classifiers = [
 [project.optional-dependencies]
 parquet = ["pyarrow"]
 pysam = ["nrel-pysam"]
+# citylearn.price_carbon: ENTSO-E prices and generation mix, and PyPSA scenario dispatch (HiGHS).
+price_carbon = ["entsoe-py>=1.0.0", "pypsa>=1.0", "highspy"]
 # LSTM thermal dynamics (LSTMDynamics), used by the 2023 challenge, Quebec, baeda_3dem and EULP neighbourhood datasets.
 dynamics = ["torch"]
 # The bundled SAC and MARLISA controllers.

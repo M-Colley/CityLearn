@@ -15,6 +15,7 @@ diferença, prevalece a versão inglesa.
 | [Schema](schema_reference.md) | Edifícios, equipamentos, topologia e mercado. |
 | [Datasets](dataset_reference.md) | Ficheiros, CSV/Parquet e conversão de unidades. |
 | [REC de Portugal](portugal_rec_datasets.md) | Quatro comunidades portuguesas e cenários de avaliação. |
+| [Preços e carbono](price_carbon_datasets.md) | Ferramentas ENTSO-E, GB e PyPSA para `pricing.csv` e `carbon_intensity.csv`. |
 | [Unidades](data_unit_contract.md) | Contrato de energia, potência, preços e duração dos passos. |
 | [Observações](observations_reference.md) | Campos, unidades, tabelas de entidades e relações. |
 | [Ações](actions_reference.md) | Intervalos e significado físico das ações. |
