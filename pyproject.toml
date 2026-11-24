@@ -36,6 +36,8 @@ pysam = ["nrel-pysam"]
 dynamics = ["torch"]
 # The bundled SAC and MARLISA controllers.
 rl = ["torch", "scikit-learn"]
+# Distribution-grid power flow (schema "grid" block): pandapower AC power flow on SimBench networks, lightsim2grid backend.
+grid = ["pandapower>=3.0", "simbench", "lightsim2grid>=1.3"]
 # Only citylearn.end_use_load_profiles (building new datasets from EULP/EnergyPlus) needs these.
 end_use_load_profiles = ["doe_xstock>=2.0.0", "openstudio<=3.10.0", "eppy", "torch", "scikit-learn"]
 

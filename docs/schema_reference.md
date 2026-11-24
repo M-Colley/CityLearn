@@ -46,6 +46,7 @@ Portuguese version: [pt/schema_reference.md](pt/schema_reference.md).
 | `topology_events` | list | if dynamic | Add/remove events. |
 | `demand_response` | object | no | Dataset-driven DSO/TSO flexibility requests and settlement. |
 | `robustness` | object | no | Dataset-driven observation, forecast, action and asset availability perturbations. |
+| `grid` | object | no | Optional distribution-grid AC power flow on a SimBench network each step. See the [grid power flow guide](grid_powerflow.md). |
 | `community_market` | object | no | Local market and market KPIs. |
 | `ev_departure_within_tolerance` | float | no | Symmetric departure SOC accuracy tolerance, default `0.05`. |
 | `ev_departure_service_tolerance` | float | no | Lower departure SOC service tolerance for minimum acceptable EV service, default `0.05`. |

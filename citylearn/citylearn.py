@@ -472,6 +472,7 @@ class CityLearnEnv(Environment, Env):
         self._topology_service = CityLearnTopologyService(self)
         self._demand_response_service = CityLearnDemandResponseService(self)
         self._robustness_service = CityLearnRobustnessService(self)
+        self._grid_service = None
         root_directory, buildings, electric_vehicles, episode_time_steps, rolling_episode_split, random_episode_split, \
             seconds_per_time_step, reward_function, central_agent, shared_observations, episode_tracker = self._load(
                 deepcopy(self.schema),
@@ -539,6 +540,7 @@ class CityLearnEnv(Environment, Env):
         self._ev_soc_carryover_context = None
         self.central_agent = central_agent
         self.shared_observations = shared_observations
+        self._initialize_grid_service()
 
         # set reward function
         self.reward_function = reward_function
@@ -872,6 +874,11 @@ class CityLearnEnv(Environment, Env):
                     else:
                         pass
 
+            if self._grid_service is not None:
+                grid_low, grid_high = self._grid_service.observation_limits()
+                low_limit.extend(grid_low)
+                high_limit.extend(grid_high)
+
             observation_space = [spaces.Box(low=np.array(low_limit), high=np.array(high_limit), dtype=np.float32)]
 
         else:
@@ -948,6 +955,9 @@ class CityLearnEnv(Environment, Env):
 
             observations = [observations]
 
+            if self._grid_service is not None:
+                observations[0].extend(self._grid_service.observation_values())
+
         else:
             observations = [list(o.values()) for o in building_observations]
 
@@ -977,6 +987,9 @@ class CityLearnEnv(Environment, Env):
 
                     else:
                         pass
+
+            if self._grid_service is not None:
+                observation_names.extend(self._grid_service.observation_names())
 
             observation_names = [observation_names]
 
@@ -1652,6 +1665,7 @@ class CityLearnEnv(Environment, Env):
                 'matching_granularity': 'aggregate_building',
             },
             'demand_response': self._demand_response_service.get_metadata(),
+            **({'grid': self._grid_service.get_metadata()} if self._grid_service is not None else {}),
             'robustness': self._robustness_service.get_metadata(),
             'entity_specs': self._entity_service.specs if self.interface == 'entity' else None,
             'buildings': [b.get_metadata() for b in self.buildings],
@@ -1700,6 +1714,38 @@ class CityLearnEnv(Environment, Env):
             stop_on_done=stop_on_done,
             return_substeps=return_substeps,
         )
+
+    def _initialize_grid_service(self):
+        """Create the optional distribution-grid power flow when the schema has a ``grid`` block."""
+
+        block = self.schema.get('grid')
+
+        if not block or (isinstance(block, Mapping) and block.get('enabled', True) is False):
+            return
+
+        if self.topology_mode == 'dynamic':
+            raise ValueError('The schema "grid" block does not support dynamic topology.')
+
+        from citylearn.internal.grid_powerflow import GridPowerFlowService
+
+        self._grid_service = GridPowerFlowService(self, block)
+
+        if self._grid_service.cfg['observations'] and (not self.central_agent or self.interface != 'flat'):
+            raise ValueError('grid.observations needs central_agent=True and the flat interface.')
+
+    @property
+    def grid(self):
+        """The distribution-grid power flow service, or `None` when the schema has no ``grid`` block."""
+
+        return self._grid_service
+
+    def grid_kpis(self) -> pd.DataFrame:
+        """District grid KPIs (voltage violations, overloading, losses) in the `evaluate_v2` row format."""
+
+        if self._grid_service is None:
+            raise ValueError('The schema has no "grid" block.')
+
+        return self._grid_service.kpis()
 
     def get_info(self) -> Mapping[Any, Any]:
         """Other information to return from the `citylearn.CityLearnEnv.step` function."""
@@ -2063,6 +2109,8 @@ class CityLearnEnv(Environment, Env):
         self._ev_soc_carryover_reset(previous_episode_end)
         self._demand_response_service.reset()
         self._robustness_service.reset()
+        if self._grid_service is not None:
+            self._grid_service.reset()
         self.associate_chargers_to_electric_vehicles()
         self._provenance_service.reset()
         from citylearn.internal.comparison import equipment, inventory, reference_configuration

@@ -262,6 +262,8 @@ class CityLearnRuntimeService:
         self.update_variables()
         self._record_deferrable_service_interval()
         env._provenance_service.settle()
+        if env._grid_service is not None:
+            env._grid_service.step()
         if debug_timing:
             timings['update_variables_time'] = time.perf_counter() - timer_start
             timings.update(getattr(env, '_last_update_variables_debug_timing', {}))
@@ -752,6 +754,8 @@ class CityLearnRuntimeService:
         self.update_variables()
         self._record_deferrable_service_interval()
         env._provenance_service.settle()
+        if env._grid_service is not None:
+            env._grid_service.step()
         if getattr(getattr(env, '_demand_response_service', None), 'enabled', False):
             env._demand_response_service.settle_current_time_step()
         if bool(getattr(env, 'physics_invariant_checks', False)):
